@@ -2045,7 +2045,8 @@ function updateSubtitleBoxDimensions(sub) {
             text: valEl ? valEl.textContent : '',
             start: slotSec[ref1] || 0,
             end: slotSec[ref2] || 0,
-            tierId: tid
+            tierId: tid,
+            committed: true   // imported annotations are existing/saved (renders gray, not draft-white)
           });
         });
       });
