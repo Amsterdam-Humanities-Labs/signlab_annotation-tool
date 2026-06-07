@@ -406,6 +406,7 @@
       <button id="dropEafBtn" class="btn btn-primary" title="Import an EAF file">Drop EAF</button>
       <button class="btn btn-outline-secondary btn-sm" data-toggle="modal" data-target="#patternHelpModal" title="Search pattern help">Regex</button>
       <button id="downloadSubtitleBtn" class="btn btn-info">Download Subtitles</button>
+      <button id="downloadVideoEafBtn" class="btn btn-info" title="Download the video (.mp4) and annotations (.eaf)">Download Video + EAF</button>
       <button id="saveSubtitlesBtn" class="btn btn-success">Autosave Enabled</button> <!-- Updated button text -->
       <button id="toggleAutoloopBtn" class="btn btn-warning">Disable Autoloop</button>
       <button id="autoSegmentBtn" class="btn btn-secondary" style="display: none;">Auto Segmentation</button>
@@ -753,8 +754,24 @@
       const needsConvert = !info || Math.round(info.fps) !== TARGET_FPS || info.width > TARGET_W || info.height > TARGET_H;
       let finalFile = file;
       if (needsConvert) {
+        const fp = fpOf(file);
+        const cached = await cacheGetConverted(fp);
+        if (cached) {
+          // Already normalized this exact file before — reuse it, no re-conversion.
+          finalFile = new File([cached], (file.name.replace(/\.[^.]+$/, '') || 'video') + '.mp4', { type: 'video/mp4' });
+          showToast('Using previously converted video (cached)', 'success', 2500);
+          URL.revokeObjectURL(srcUrl);
+          videoFileName = (file.name.replace(/\.[^.]+$/, '') || 'video') + '.mp4';
+          videoBlob = finalFile;
+          videoSavedToDir = false;
+          document.getElementById('dropOverlay').style.display = 'none';
+          await start(finalFile);
+          uploadSubtitles();
+          return true;
+        }
         try {
           finalFile = await convertVideoWithProgress(file);
+          cachePutConverted(fp, finalFile); // cache for next time (fire-and-forget)
         } catch (e) {
           hideConvertModal();
           console.error('Conversion failed:', e);
@@ -2021,6 +2038,26 @@ function updateSubtitleBoxDimensions(sub) {
         URL.revokeObjectURL(url);
       });
     }
+
+    function triggerDownload(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    // Download the normalized video (.mp4) + the annotations (.eaf).
+    function downloadVideoAndEaf() {
+      const base = (videoFileName || 'annotation').replace(/\.[^.]+$/, '');
+      triggerDownload(new Blob([buildEAF(videoFileName)], { type: 'application/xml' }), base + '.eaf');
+      if (videoBlob) {
+        setTimeout(() => triggerDownload(videoBlob, base + '.mp4'), 400); // stagger so the browser allows both
+        showToast('Downloading ' + base + '.eaf and ' + base + '.mp4', 'success', 3000);
+      } else {
+        showToast('No video loaded — downloaded ' + base + '.eaf only', 'success', 3500);
+      }
+    }
     document.querySelectorAll('.speed-btn').forEach(btn => {
       btn.addEventListener('click', function() {
         const speed = parseFloat(this.dataset.speed);
@@ -2146,30 +2183,39 @@ function updateSubtitleBoxDimensions(sub) {
 
     // --- IndexedDB helper for persisting the working-directory handle ---
     const HANDLE_DB = 'annotationTool', HANDLE_STORE = 'handles', HANDLE_KEY = 'workdir';
+    const CACHE_STORE = 'convertedCache'; // source-file fingerprint -> converted video Blob
     function idbOpen() {
       return new Promise((res, rej) => {
-        const r = indexedDB.open(HANDLE_DB, 1);
-        r.onupgradeneeded = () => r.result.createObjectStore(HANDLE_STORE);
+        const r = indexedDB.open(HANDLE_DB, 2);
+        r.onupgradeneeded = e => {
+          const db = r.result;
+          if (!db.objectStoreNames.contains(HANDLE_STORE)) db.createObjectStore(HANDLE_STORE);
+          if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE);
+        };
         r.onsuccess = () => res(r.result);
         r.onerror = () => rej(r.error);
       });
     }
-    async function idbSet(key, val) {
+    async function idbSet(key, val, store = HANDLE_STORE) {
       const db = await idbOpen();
       return new Promise((res, rej) => {
-        const tx = db.transaction(HANDLE_STORE, 'readwrite');
-        tx.objectStore(HANDLE_STORE).put(val, key);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(val, key);
         tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
       });
     }
-    async function idbGet(key) {
+    async function idbGet(key, store = HANDLE_STORE) {
       const db = await idbOpen();
       return new Promise((res, rej) => {
-        const tx = db.transaction(HANDLE_STORE, 'readonly');
-        const rq = tx.objectStore(HANDLE_STORE).get(key);
+        const tx = db.transaction(store, 'readonly');
+        const rq = tx.objectStore(store).get(key);
         rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
       });
     }
+    // Converted-video cache: skip re-converting a source file we've already normalized.
+    const fpOf = file => file.name + '|' + file.size + '|' + file.lastModified;
+    const cacheGetConverted = fp => idbGet(fp, CACHE_STORE).catch(() => null);
+    const cachePutConverted = (fp, blob) => idbSet(fp, blob, CACHE_STORE).catch(() => {});
 
     // --- Working-directory handle state + permission helpers ---
     let workDirHandle = null;
@@ -3149,6 +3195,7 @@ ${tierXml}
 
     document.getElementById('saveSubtitlesBtn').addEventListener('click', uploadSubtitles);
     document.getElementById('downloadSubtitleBtn').addEventListener('click', downloadSubtitle);
+    document.getElementById('downloadVideoEafBtn').addEventListener('click', downloadVideoAndEaf);
     document.getElementById('revertSegmentBtn').addEventListener('click', revertToOriginalSegments);
     document.getElementById('addTierBtn').addEventListener('click', addTier);
 
