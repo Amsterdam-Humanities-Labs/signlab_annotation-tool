@@ -2051,6 +2051,56 @@ function updateSubtitleBoxDimensions(sub) {
       }
     }
 
+    // Parse an ELAN .eaf XML string into { tiers:[{id,name}], subtitles:[{id,text,start,end,tierId}] }
+    function parseEAF(xmlString) {
+      const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+      if (doc.querySelector('parsererror')) throw new Error('Invalid EAF XML');
+
+      // TIME_SLOT id -> seconds
+      const slotSec = {};
+      doc.querySelectorAll('TIME_ORDER > TIME_SLOT').forEach(ts => {
+        const id = ts.getAttribute('TIME_SLOT_ID');
+        const ms = ts.getAttribute('TIME_VALUE');
+        slotSec[id] = ms != null ? (parseInt(ms, 10) / 1000) : 0;
+      });
+
+      const outTiers = [];
+      const outSubs = [];
+      let localTierUid = 0, localSubId = 0;
+
+      doc.querySelectorAll('TIER').forEach(tierEl => {
+        const name = tierEl.getAttribute('TIER_ID') || ('Tier ' + (localTierUid + 1));
+        const tid = ++localTierUid;
+        outTiers.push({ id: tid, name });
+        tierEl.querySelectorAll('ANNOTATION > ALIGNABLE_ANNOTATION').forEach(ann => {
+          const ref1 = ann.getAttribute('TIME_SLOT_REF1');
+          const ref2 = ann.getAttribute('TIME_SLOT_REF2');
+          const valEl = ann.querySelector('ANNOTATION_VALUE');
+          outSubs.push({
+            id: ++localSubId,
+            text: valEl ? valEl.textContent : '',
+            start: slotSec[ref1] || 0,
+            end: slotSec[ref2] || 0,
+            tierId: tid
+          });
+        });
+      });
+
+      if (!outTiers.length) outTiers.push({ id: ++localTierUid, name: 'Tier 1' });
+      return { tiers: outTiers, subtitles: outSubs, nextTierUid: localTierUid, nextSubId: localSubId };
+    }
+
+    function loadEAFString(xmlString) {
+      const parsed = parseEAF(xmlString);
+      tiers = parsed.tiers;
+      tierUid = parsed.nextTierUid;
+      subtitles = parsed.subtitles;
+      uniqueId = Math.max(uniqueId || 0, parsed.nextSubId);
+      renderAll();
+      // rebuildTierControls is defined in a later task; guard so this is safe to call now.
+      if (typeof rebuildTierControls === 'function') rebuildTierControls();
+    }
+
     function addSubtitle() {
       uniqueId++;
       const newStart = 0, defaultDur = 0.2;
