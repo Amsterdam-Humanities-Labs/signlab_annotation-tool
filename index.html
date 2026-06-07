@@ -317,6 +317,15 @@
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
 </head>
 <body>
+<div id="dropOverlay" style="position:fixed;inset:0;z-index:9999;background:rgba(20,20,30,.92);
+     color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
+     text-align:center;font-family:sans-serif;">
+  <h2>Drop a video (.mp4) and optionally an EAF (.eaf)</h2>
+  <p>or pick files:</p>
+  <input type="file" id="filePicker" accept=".mp4,video/mp4,.eaf,application/xml" multiple>
+  <p id="dropHint" style="margin-top:12px;opacity:.7;font-size:13px;">
+    Chrome or Edge required (File System Access API for autosave).</p>
+</div>
 <div id="toast-container"></div>
 
   <!-- Canvas Preview and Controls -->
@@ -476,6 +485,7 @@
     // Global state
     const TIER_HEIGHT = 80;
     let videoDuration = 5, subtitles = [], uniqueId = 0;
+    let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
 
     let tierUid = 0;
     let tiers = [{ id: ++tierUid, name: 'Tier 1' }]; // dynamic 1..N
@@ -577,11 +587,30 @@
       // checkAutoLoop(); // Removed: Logic moved to playInterval
     }
 
+    async function handleDroppedFiles(fileList) {
+      let videoFile = null, eafFile = null;
+      for (const f of fileList) {
+        const lower = f.name.toLowerCase();
+        if (lower.endsWith('.eaf')) eafFile = f;
+        else if (lower.endsWith('.mp4') || f.type === 'video/mp4') videoFile = f;
+      }
+      if (eafFile) {
+        const text = await eafFile.text();
+        try { loadEAFString(text); }
+        catch (err) { alert('Could not parse EAF: ' + err.message); }
+      }
+      if (videoFile) {
+        videoFileName = videoFile.name;
+        document.getElementById('dropOverlay').style.display = 'none';
+        await start(videoFile);
+      } else if (eafFile) {
+        // EAF only: hide overlay so the user can review/edit annotations
+        document.getElementById('dropOverlay').style.display = 'none';
+      }
+    }
+
     // Load video frames from file
     window.start = async function(file) {
-      // get filename from url
-      const urlParams = new URLSearchParams(window.location.search);
-      const filename = urlParams.get('filename');
       const videoUrl = URL.createObjectURL(file);
       
       // Ensure fps is set to the base rate before loading frames
@@ -1813,36 +1842,6 @@ function updateSubtitleBoxDimensions(sub) {
         URL.revokeObjectURL(url);
       });
     }
-    (function() {
-      const params = new URLSearchParams(window.location.search);
-      const fileParam = params.get('filename');
-      if (fileParam) {
-        const videoFile = fileParam.replace(/\.wav$/i, '.mp4');
-        const postUrl = "https://signcollect.nl/gebarenoverleg_media/studioFilesMini/post/" + videoFile;
-        const rawUrl = "https://signcollect.nl/gebarenoverleg_media/studioFilesMini/raw/" + videoFile;
-
-        // Try post directory first
-        fetch(postUrl)
-          .then(res => {
-            if (!res.ok) {
-              // If not found in post, try raw directory
-              return fetch(rawUrl);
-            }
-            return res;
-          })
-          .then(res => {
-            if (!res.ok) {
-              throw new Error('Video file not found in post or raw directories');
-            }
-            return res.blob();
-          })
-          .then(blob => { start(blob); })
-          .catch(err => {
-            console.error('Error loading video:', err);
-            alert('Could not load video file: ' + videoFile);
-          });
-      }
-    })();
     document.querySelectorAll('.speed-btn').forEach(btn => {
       btn.addEventListener('click', function() {
         const speed = parseFloat(this.dataset.speed);
@@ -3394,6 +3393,15 @@ document.addEventListener('mousedown', function(e) {
       isSyncingScroll = false;
     });
     // End of scroll synchronization section
+
+    // Drag-and-drop / file picker for video + EAF
+    ['dragover','drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+    document.addEventListener('drop', e => {
+      if (e.dataTransfer && e.dataTransfer.files.length) handleDroppedFiles(e.dataTransfer.files);
+    });
+    document.getElementById('filePicker').addEventListener('change', e => {
+      if (e.target.files.length) handleDroppedFiles(e.target.files);
+    });
 
 </script>
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
