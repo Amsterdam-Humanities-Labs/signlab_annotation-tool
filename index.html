@@ -364,6 +364,8 @@
         <button type="button" class="btn btn-secondary zoom-btn" id="zoomOutBtn">-</button>
         <button type="button" class="btn btn-secondary zoom-btn" id="zoomInBtn">+</button>
       </div>
+      <div id="tierControls" class="btn-group ml-2" role="group" aria-label="Tiers"></div>
+      <button id="addTierBtn" class="btn btn-sm btn-outline-secondary ml-1" type="button">+ Tier</button>
     </div>
   </div>
   
@@ -2921,10 +2923,50 @@ ${tierXml}
       return stageNames[stage] || stage;
     }
 
+    function rebuildTierControls() {
+      const wrap = document.getElementById('tierControls');
+      if (!wrap) return;
+      wrap.innerHTML = '';
+      tiers.forEach(t => {
+        const chip = document.createElement('span');
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-right:6px;font-size:12px;';
+        const label = document.createElement('span');
+        label.textContent = t.name;
+        label.title = 'Double-click to rename';
+        label.style.cursor = 'pointer';
+        label.ondblclick = () => {
+          const name = prompt('Rename tier', t.name);
+          if (name && name.trim()) { t.name = name.trim(); rebuildTierControls(); renderAll(); }
+        };
+        const del = document.createElement('button');
+        del.textContent = '×';
+        del.className = 'btn btn-sm btn-outline-danger';
+        del.style.cssText = 'padding:0 5px;line-height:1;';
+        del.onclick = () => removeTier(t.id);
+        chip.appendChild(label); chip.appendChild(del);
+        wrap.appendChild(chip);
+      });
+    }
+
+    function addTier() {
+      tiers.push({ id: ++tierUid, name: 'Tier ' + (tiers.length + 1) });
+      rebuildTierControls(); renderAll(); uploadSubtitles();
+    }
+
+    function removeTier(id) {
+      if (tiers.length <= 1) { alert('At least one tier is required.'); return; }
+      if (!confirm('Delete this tier and its annotations?')) return;
+      subtitles = subtitles.filter(s => s.tierId !== id);
+      tiers = tiers.filter(t => t.id !== id);
+      rebuildTierControls(); renderAll(); uploadSubtitles();
+    }
+
     document.getElementById('saveSubtitlesBtn').addEventListener('click', uploadSubtitles);
     document.getElementById('downloadSubtitleBtn').addEventListener('click', downloadSubtitle);
     document.getElementById('addSubtitleBtn').addEventListener('click', addSubtitle);
     document.getElementById('revertSegmentBtn').addEventListener('click', revertToOriginalSegments);
+    document.getElementById('addTierBtn').addEventListener('click', addTier);
+    rebuildTierControls(); // initial paint
     renderAll();
     window.jumpPrevFrame = () => {
       let newTime = currentTime - (1/fps);
