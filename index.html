@@ -476,6 +476,19 @@
     // Global state
     const TIER_HEIGHT = 80;
     let videoDuration = 5, subtitles = [], uniqueId = 0;
+
+    let tierUid = 0;
+    let tiers = [{ id: ++tierUid, name: 'Tier 1' }]; // dynamic 1..N
+
+    function tierIndexById(id) { return tiers.findIndex(t => t.id === id); }
+    function tierById(id) { return tiers.find(t => t.id === id); }
+    function tierVisible(id) {
+      const t = tierById(id);
+      return t ? (t.visible !== false) : false;
+    }
+    function defaultTierId() { return tiers.length ? tiers[0].id : null; }
+    function tierRows() { return tiers.length; }          // number of timeline rows
+    function tierRowTop(tierId) { return tierIndexById(tierId) * TIER_HEIGHT; }
     let autoLoopEnabled = true, loopSubtitle = null;
     let pendingStartTime = null, waitingForEnd = false, addClickLocked = false;
     let lastMouseEvent = null;
@@ -621,7 +634,6 @@
     const timelineContainer = document.getElementById('timelineContainer');
     let pixelsPerSecond = 500; // Define fixed pixels per second, make it mutable
     // let zoomLevel = 1; // Remove zoomLevel
-    const tierVisibility = { 0: true, 1: true, 2: true };
     let syncEnabled = false; // sync enabled by default
     function getScale() { 
       // return (timelineContainer.clientWidth * zoomLevel) / videoDuration; // Remove old calculation
@@ -942,7 +954,7 @@ function updateSubtitleBoxDimensions(sub) {
       // Swap the first two divs by changing the order of labels
       const tracks = ["Nederlands", "Gebaar-voor-Gebaar", "Signbank ID glossen"];
       tracks.forEach((label, index) => {
-        if (!tierVisibility[index]) return;
+        if (!(tiers[index] && tierVisible(tiers[index].id))) return;
         const bg = document.createElement('div');
         bg.style.position = 'absolute';
         bg.className = 'tier-label';
@@ -963,7 +975,7 @@ function updateSubtitleBoxDimensions(sub) {
       });
       subtitles.forEach(sub => {
         // Skip rendering if this tier is hidden
-        if (!tierVisibility[sub.tier]) return;
+        if (!tierVisible(sub.tier)) return;
         const box = document.createElement('div');
         box.className = 'subtitle-box';
         box.style.left = timeToPx(sub.start) + 'px';
@@ -2038,7 +2050,7 @@ function updateSubtitleBoxDimensions(sub) {
     function addSubtitle() {
       uniqueId++;
       const newStart = 0, defaultDur = 0.2;
-      subtitles.push({ id: uniqueId, text: '', start: newStart, end: newStart + defaultDur, tier: 0 });
+      subtitles.push({ id: uniqueId, text: '', start: newStart, end: newStart + defaultDur, tierId: defaultTierId() });
       // Removed save button text update
       renderAll();
       uploadSubtitles(); // Autosave after adding a new subtitle
