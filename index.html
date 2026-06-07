@@ -982,6 +982,7 @@ function updateSubtitleBoxDimensions(sub) {
     function renderAll() {
       const timelineTrack = document.getElementById('timelineTrack');
       timelineTrack.innerHTML = "";
+      timelineTrack.style.height = (tierRows() * TIER_HEIGHT) + "px";
       if (waitingForEnd) timelineTrack.appendChild(pendingPreviewDiv);
       // Render one background row + label per dynamic tier
       tiers.forEach((t, idx) => {
