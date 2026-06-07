@@ -334,6 +334,27 @@
   </div>
   <p style="margin-top:10px;opacity:.7;font-size:13px;">Normalizing to 25&nbsp;fps / 1080p to keep memory in check.</p>
 </div>
+<div id="eafDropBox" style="display:none;position:fixed;inset:0;z-index:10001;background:rgba(20,20,30,.92);
+     color:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-family:sans-serif;">
+  <div id="eafDropZone" style="border:3px dashed #6faaff;border-radius:16px;padding:54px 88px;transition:background .15s,border-color .15s;">
+    <h2 style="margin:0 0 6px;">Drop EAF here</h2>
+    <p style="opacity:.8;margin:0 0 14px;">replaces the current tiers &amp; annotations</p>
+    <p style="margin:0;">or <label for="eafPicker" style="color:#6faaff;cursor:pointer;text-decoration:underline;">pick a file</label></p>
+    <input type="file" id="eafPicker" accept=".eaf,application/xml" style="display:none;">
+  </div>
+  <button id="eafDropClose" class="btn btn-light" style="margin-top:20px;">Cancel</button>
+</div>
+<div id="uiModal" style="display:none;position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.5);
+     align-items:center;justify-content:center;font-family:sans-serif;">
+  <div style="background:#fff;color:#222;border-radius:10px;padding:22px 26px;max-width:460px;width:90%;box-shadow:0 12px 48px rgba(0,0,0,.35);">
+    <div id="uiModalMsg" style="font-size:15px;margin-bottom:14px;white-space:pre-wrap;line-height:1.4;"></div>
+    <input id="uiModalInput" type="text" class="form-control" style="display:none;margin-bottom:14px;">
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button id="uiModalCancel" class="btn btn-outline-secondary btn-sm">Cancel</button>
+      <button id="uiModalOk" class="btn btn-primary btn-sm">OK</button>
+    </div>
+  </div>
+</div>
 <div id="toast-container"></div>
 
   <!-- Canvas Preview and Controls -->
@@ -380,6 +401,7 @@
   <div class="bottom-bar">
     <div class="add-bar mb-2">
       <button id="addSubtitleBtn" class="btn btn-primary">+ Add Subtitle</button>
+      <button id="dropEafBtn" class="btn btn-outline-primary" title="Import an EAF file">Drop EAF</button>
       <button class="btn btn-outline-secondary btn-sm" data-toggle="modal" data-target="#patternHelpModal" title="Search pattern help">Regex</button>
       <button id="downloadSubtitleBtn" class="btn btn-info">Download Subtitles</button>
       <button id="saveSubtitlesBtn" class="btn btn-success">Autosave Enabled</button> <!-- Updated button text -->
@@ -584,7 +606,7 @@
       if (eafFile) {
         const text = await eafFile.text();
         try { loadEAFString(text); }
-        catch (err) { alert('Could not parse EAF: ' + err.message); }
+        catch (err) { showToast('Could not parse EAF: ' + err.message, 'error', 5000); }
       }
       if (videoFile) {
         await prepareAndLoadVideo(videoFile); // probe, convert to 25fps/1080p if needed, guard memory, then load
@@ -618,6 +640,43 @@
       if (pct != null) document.getElementById('convertBar').style.width = pct + '%';
     }
     function hideConvertModal() { document.getElementById('convertModal').style.display = 'none'; }
+
+    // ---- In-page dialogs (replace native alert/confirm/prompt) ----
+    function uiDialog({ message, input = false, defaultValue = '', okText = 'OK', showCancel = true }) {
+      return new Promise(resolve => {
+        const modal = document.getElementById('uiModal');
+        const msg = document.getElementById('uiModalMsg');
+        const inp = document.getElementById('uiModalInput');
+        const ok = document.getElementById('uiModalOk');
+        const cancel = document.getElementById('uiModalCancel');
+        msg.textContent = message;
+        ok.textContent = okText;
+        cancel.style.display = showCancel ? '' : 'none';
+        if (input) { inp.style.display = ''; inp.value = defaultValue; } else { inp.style.display = 'none'; }
+        modal.style.display = 'flex';
+        if (input) setTimeout(() => { inp.focus(); inp.select(); }, 0); else setTimeout(() => ok.focus(), 0);
+        const cleanup = () => { modal.style.display = 'none'; ok.onclick = cancel.onclick = inp.onkeydown = null; };
+        ok.onclick = () => { const v = input ? inp.value : true; cleanup(); resolve(v); };
+        cancel.onclick = () => { cleanup(); resolve(input ? null : false); };
+        inp.onkeydown = e => { if (e.key === 'Enter') ok.click(); else if (e.key === 'Escape') cancel.click(); };
+      });
+    }
+    const uiAlert = m => uiDialog({ message: m, showCancel: false });
+    const uiConfirm = m => uiDialog({ message: m });
+    const uiPrompt = (m, def = '') => uiDialog({ message: m, input: true, defaultValue: def });
+
+    // ---- EAF drop box (import an EAF after the app is loaded) ----
+    function showEafDropBox() { document.getElementById('eafDropBox').style.display = 'flex'; }
+    function hideEafDropBox() { document.getElementById('eafDropBox').style.display = 'none'; }
+    async function loadEafFile(file) {
+      try {
+        loadEAFString(await file.text());
+        showToast('Loaded ' + file.name, 'success');
+      } catch (e) {
+        showToast('Could not parse EAF: ' + (e && e.message ? e.message : e), 'error', 5000);
+      }
+      hideEafDropBox();
+    }
 
     async function loadFFmpeg() {
       if (ffmpegInstance) return ffmpegInstance;
@@ -681,7 +740,7 @@
         const estBytes = tw * th * 4 * estFrames;
         if (estBytes > MAX_DECODE_BYTES) {
           URL.revokeObjectURL(srcUrl);
-          alert('This video would need about ' + gb(estBytes) + ' GB of memory to load (' +
+          await uiAlert('This video would need about ' + gb(estBytes) + ' GB of memory to load (' +
             estFrames + ' frames at ' + tw + '×' + th + '). The limit is ' + gb(MAX_DECODE_BYTES) +
             ' GB to avoid crashing. Please use a shorter clip.');
           return false;
@@ -696,7 +755,7 @@
         } catch (e) {
           hideConvertModal();
           console.error('Conversion failed:', e);
-          alert('Video conversion failed: ' + (e && e.message ? e.message : e));
+          showToast('Video conversion failed: ' + (e && e.message ? e.message : e), 'error', 6000);
           URL.revokeObjectURL(srcUrl);
           return false;
         }
@@ -710,7 +769,7 @@
             const estBytes = outInfo.width * outInfo.height * 4 * Math.max(1, frames);
             if (estBytes > MAX_DECODE_BYTES) {
               URL.revokeObjectURL(srcUrl);
-              alert('This video would need about ' + gb(estBytes) + ' GB of memory to load. The limit is ' +
+              await uiAlert('This video would need about ' + gb(estBytes) + ' GB of memory to load. The limit is ' +
                 gb(MAX_DECODE_BYTES) + ' GB. Please use a shorter clip.');
               return false;
             }
@@ -2808,7 +2867,7 @@ ${tierXml}
     document.getElementById('autoSegmentBtn').addEventListener('click', async function() {
       // Prevent concurrent requests
       if (isSegmentationInProgress) {
-        alert('Segmentation is already in progress. Please wait.');
+        showToast('Segmentation is already in progress. Please wait.', 'error', 3000);
         return;
       }
 
@@ -3050,8 +3109,8 @@ ${tierXml}
       tiers.forEach(t => {
         const chip = document.createElement('span');
         chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-right:6px;font-size:12px;';
-        const renameTier = () => {
-          const name = prompt('Rename tier', t.name);
+        const renameTier = async () => {
+          const name = await uiPrompt('Rename tier', t.name);
           if (name && name.trim()) {
             t.name = name.trim();
             rebuildTierControls(); renderAll(); uploadSubtitles();
@@ -3084,9 +3143,9 @@ ${tierXml}
       rebuildTierControls(); renderAll(); uploadSubtitles();
     }
 
-    function removeTier(id) {
-      if (tiers.length <= 1) { alert('At least one tier is required.'); return; }
-      if (!confirm('Delete this tier and its annotations?')) return;
+    async function removeTier(id) {
+      if (tiers.length <= 1) { showToast('At least one tier is required.', 'error', 3000); return; }
+      if (!(await uiConfirm('Delete this tier and its annotations?'))) return;
       subtitles = subtitles.filter(s => s.tierId !== id);
       tiers = tiers.filter(t => t.id !== id);
       rebuildTierControls(); renderAll(); uploadSubtitles();
@@ -3097,6 +3156,23 @@ ${tierXml}
     document.getElementById('addSubtitleBtn').addEventListener('click', addSubtitle);
     document.getElementById('revertSegmentBtn').addEventListener('click', revertToOriginalSegments);
     document.getElementById('addTierBtn').addEventListener('click', addTier);
+
+    // EAF drop box wiring
+    document.getElementById('dropEafBtn').addEventListener('click', showEafDropBox);
+    document.getElementById('eafDropClose').addEventListener('click', hideEafDropBox);
+    document.getElementById('eafPicker').addEventListener('change', e => { if (e.target.files[0]) loadEafFile(e.target.files[0]); });
+    (function () {
+      const box = document.getElementById('eafDropBox'), zone = document.getElementById('eafDropZone');
+      const reset = () => { zone.style.background = ''; zone.style.borderColor = '#6faaff'; };
+      box.addEventListener('dragover', e => { e.preventDefault(); zone.style.background = 'rgba(111,170,255,.15)'; zone.style.borderColor = '#9cc4ff'; });
+      box.addEventListener('dragleave', e => { if (e.target === box) reset(); });
+      box.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation(); reset();
+        const f = [...((e.dataTransfer && e.dataTransfer.files) || [])].find(f => f.name.toLowerCase().endsWith('.eaf'));
+        if (f) loadEafFile(f); else showToast('Please drop an .eaf file', 'error', 3000);
+      });
+      box.addEventListener('click', e => { if (e.target === box) hideEafDropBox(); }); // click backdrop to close
+    })();
     rebuildTierControls(); // initial paint
     renderAll();
     window.jumpPrevFrame = () => {
@@ -3592,7 +3668,7 @@ document.addEventListener('mousedown', function(e) {
           }
         }
         if (!latest) return;
-        if (!confirm('Restore last session from ' + latest.name + '?')) return;
+        if (!(await uiConfirm('Restore last session from ' + latest.name + '?'))) return;
         loadEAFString(await latest.file.text());
 
         // If a matching video sits in the same folder, reload it; otherwise prompt for it.
