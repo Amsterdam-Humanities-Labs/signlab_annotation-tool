@@ -370,40 +370,6 @@
       <button id="autoSegmentBtn" class="btn btn-secondary" style="display: none;">Auto Segmentation</button>
       <button id="revertSegmentBtn" class="btn btn-outline-danger" style="display: none;">Revert to Original Segments</button>
       <button id="toggleSideCanvasBtn" class="btn btn-outline-secondary">Hide Side Videos</button>
-      <span id="statusBar" class="ml-2" style="display: inline-flex; align-items: center; gap: 6px;">
-        <label style="margin:0;font-size:11px;">Video:
-          <select id="statusVideo" class="form-control form-control-sm" style="display:inline;width:auto;font-size:11px;padding:1px 4px;">
-            <option value="">Leeg</option>
-            <option value="Niet Klaar">Niet Klaar</option>
-            <option value="Klaar">Klaar</option>
-            <option value="Signbank">Signbank</option>
-          </select>
-        </label>
-        <label style="margin:0;font-size:11px;">Nederlands:
-          <select id="statusNederlands" class="form-control form-control-sm" style="display:inline;width:auto;font-size:11px;padding:1px 4px;">
-            <option value="">Leeg</option>
-            <option value="Niet Klaar">Niet Klaar</option>
-            <option value="Klaar">Klaar</option>
-            <option value="Controle nodig">Controle nodig</option>
-          </select>
-        </label>
-        <label style="margin:0;font-size:11px;">Glossen:
-          <select id="statusGlossen" class="form-control form-control-sm" style="display:inline;width:auto;font-size:11px;padding:1px 4px;">
-            <option value="">Leeg</option>
-            <option value="Niet Klaar">Niet Klaar</option>
-            <option value="Klaar">Klaar</option>
-            <option value="NVT">NVT</option>
-          </select>
-        </label>
-        <label style="margin:0;font-size:11px;">GvG:
-          <select id="statusGvG" class="form-control form-control-sm" style="display:inline;width:auto;font-size:11px;padding:1px 4px;">
-            <option value="">Leeg</option>
-            <option value="Niet Klaar">Niet Klaar</option>
-            <option value="Klaar">Klaar</option>
-            <option value="Check nodig">Check nodig</option>
-          </select>
-        </label>
-      </span>
       <span class="ml-2">Drag handle to move; edges to resize; click text to edit.</span>
     </div>
 
@@ -630,19 +596,8 @@
             currentZinArray = zinData.zinArray; // Store the array
             const sentence = currentZinArray.join(' ');
             zinDisplayElement.textContent = sentence; // Display the sentence
-            // Load status values from response
             if (zinData.sentenceRowId) {
               currentSentenceRowId = zinData.sentenceRowId;
-              document.getElementById('statusVideo').value = zinData.status_video || '';
-              document.getElementById('statusNederlands').value = zinData.status_annotatie || '';
-              document.getElementById('statusGlossen').value = zinData.status_glos || '';
-              document.getElementById('statusGvG').value = zinData.status_gvg || '';
-
-              // Hide the status controls when the sentence has two or more videos
-              const statusBar = document.getElementById('statusBar');
-              if (statusBar) {
-                statusBar.style.display = (Number(zinData.video_count) >= 2) ? 'none' : 'inline-flex';
-              }
             }
           } else {
             currentZinArray = []; // Reset if fetch fails
@@ -3366,29 +3321,6 @@ document.addEventListener('mousedown', function(e) {
         }, 1000 / fps); // Interval delay remains based on base fps
     }
 
-    // Status dropdown change listeners
-    function saveStatus(action, paramName, value) {
-      if (!currentSentenceRowId) return;
-      const formData = new FormData();
-      formData.append('rowId', currentSentenceRowId);
-      formData.append(paramName, value);
-      fetch('getZinnen.php?action=' + action, { method: 'POST', body: formData })
-        .then(r => r.json())
-        .then(data => { if (!data.success) console.error('Status save failed:', data.error); })
-        .catch(err => console.error('Status save error:', err));
-    }
-    document.getElementById('statusVideo').addEventListener('change', function() {
-      saveStatus('saveStatusVideo', 'statusVideo', this.value);
-    });
-    document.getElementById('statusNederlands').addEventListener('change', function() {
-      saveStatus('saveStatusAnnotatie', 'statusAnnotatie', this.value);
-    });
-    document.getElementById('statusGlossen').addEventListener('change', function() {
-      saveStatus('saveStatusGlos', 'statusGlos', this.value);
-    });
-    document.getElementById('statusGvG').addEventListener('change', function() {
-      saveStatus('saveStatusGvg', 'statusGvg', this.value);
-    });
 
     // Tab navigation between subtitle boxes in the same tier
     document.addEventListener('keydown', function(e) {
