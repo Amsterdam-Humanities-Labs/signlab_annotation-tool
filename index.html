@@ -3471,6 +3471,40 @@ document.addEventListener('mousedown', function(e) {
       if (e.target.files.length) handleDroppedFiles(e.target.files);
     });
 
+    async function tryRestoreSession() {
+      try {
+        const cached = await idbGet(HANDLE_KEY);
+        if (!cached) return;
+        if (!(await verifyPermission(cached))) return; // user must re-grant; skip silently
+        workDirHandle = cached;
+        // Find the most recent .eaf in the folder
+        let latest = null;
+        for await (const [name, handle] of cached.entries()) {
+          if (handle.kind === 'file' && name.toLowerCase().endsWith('.eaf')) {
+            const file = await handle.getFile();
+            if (!latest || file.lastModified > latest.lastModified) latest = { name, file };
+          }
+        }
+        if (!latest) return;
+        if (!confirm('Restore last session from ' + latest.name + '?')) return;
+        loadEAFString(await latest.file.text());
+
+        // If a matching video sits in the same folder, offer to load it
+        const base = latest.name.replace(/\.eaf$/i, '');
+        for await (const [name, handle] of cached.entries()) {
+          if (handle.kind === 'file' && name.toLowerCase().startsWith(base.toLowerCase()) &&
+              name.toLowerCase().endsWith('.mp4')) {
+            const vf = await handle.getFile();
+            videoFileName = vf.name;
+            document.getElementById('dropOverlay').style.display = 'none';
+            await start(vf);
+            break;
+          }
+        }
+      } catch (err) { console.warn('Restore skipped:', err); }
+    }
+    tryRestoreSession();
+
 </script>
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
