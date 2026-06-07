@@ -2005,50 +2005,76 @@ function updateSubtitleBoxDimensions(sub) {
       autosaveTimer = setTimeout(performUpload, 1000); // Set new timer for 1 second
     }
 
+    // --- IndexedDB helper for persisting the working-directory handle ---
+    const HANDLE_DB = 'annotationTool', HANDLE_STORE = 'handles', HANDLE_KEY = 'workdir';
+    function idbOpen() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open(HANDLE_DB, 1);
+        r.onupgradeneeded = () => r.result.createObjectStore(HANDLE_STORE);
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    }
+    async function idbSet(key, val) {
+      const db = await idbOpen();
+      return new Promise((res, rej) => {
+        const tx = db.transaction(HANDLE_STORE, 'readwrite');
+        tx.objectStore(HANDLE_STORE).put(val, key);
+        tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+      });
+    }
+    async function idbGet(key) {
+      const db = await idbOpen();
+      return new Promise((res, rej) => {
+        const tx = db.transaction(HANDLE_STORE, 'readonly');
+        const rq = tx.objectStore(HANDLE_STORE).get(key);
+        rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+      });
+    }
+
+    // --- Working-directory handle state + permission helpers ---
+    let workDirHandle = null;
+
+    async function verifyPermission(handle) {
+      const opts = { mode: 'readwrite' };
+      if ((await handle.queryPermission(opts)) === 'granted') return true;
+      if ((await handle.requestPermission(opts)) === 'granted') return true;
+      return false;
+    }
+
+    async function ensureWorkDir() {
+      if (workDirHandle) {
+        if (await verifyPermission(workDirHandle)) return workDirHandle;
+      }
+      const cached = await idbGet(HANDLE_KEY);
+      if (cached && await verifyPermission(cached)) { workDirHandle = cached; return workDirHandle; }
+      if (!window.showDirectoryPicker) {
+        showToast('Autosave needs Chrome/Edge (File System Access API).', 'error', 5000);
+        return null;
+      }
+      workDirHandle = await window.showDirectoryPicker({ id: 'annotation-temp', mode: 'readwrite' });
+      await idbSet(HANDLE_KEY, workDirHandle);
+      return workDirHandle;
+    }
+
     // Actual upload logic
     async function performUpload() {
-      //we have to get filename from the url
-      const params = new URLSearchParams(window.location.search);
-      const fileParam = params.get('filename') || '';
-
-      //replace whitespace with _
-    const sanitizedFileParam = fileParam.replace(/\s+/g, '_');
-
-      // Prevent saving if no filename is present
-      if (!sanitizedFileParam) {
-        console.warn("Cannot save subtitles without a filename.");
-        // Optionally provide user feedback, e.g., disable save button or show message
-        // document.getElementById('saveSubtitlesBtn').disabled = true;
-        // document.getElementById('saveSubtitlesBtn').textContent = "Filename missing";
-        return;
-      }
-
+      if (!subtitles.length && tiers.length <= 1) { hasUnsavedChanges = false; return; }
       try {
-        console.log("Performing autosave:", subtitles);
-        console.log("Sanitized filename:", sanitizedFileParam);
-        const response = await fetch('getZinnen.php?action=saveSubtitlesAndEAFFiles&filename='+sanitizedFileParam, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ subtitles: subtitles })
-        });
-        const data = await response.json();
-        if (data.success) {
-            console.log("Autosave successful.");
-            hasUnsavedChanges = false;
-            document.getElementById('saveSubtitlesBtn').textContent = "Autosave Enabled";
-            showToast('Saving successful', 'success');
-        } else {
-            console.error("Autosave failed:", data.error);
-            document.getElementById('saveSubtitlesBtn').textContent = "Save Failed!";
-            showToast('Save failed: ' + data.error, 'error', 5000);
-            alert('Autosave failed: ' + data.error);
-        }
-
+        const dir = await ensureWorkDir();
+        if (!dir) { document.getElementById('saveSubtitlesBtn').textContent = 'Autosave: pick folder'; return; }
+        const base = (videoFileName || 'annotation').replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
+        const fileHandle = await dir.getFileHandle(base + '.eaf', { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(buildEAF(videoFileName));
+        await writable.close();
+        hasUnsavedChanges = false;
+        document.getElementById('saveSubtitlesBtn').textContent = 'Autosave Enabled';
+        showToast('Saved ' + base + '.eaf', 'success');
       } catch (err) {
-        console.error('Upload error', err);
-        document.getElementById('saveSubtitlesBtn').textContent = "Save Error!";
-        showToast('Network error - changes NOT saved!', 'error', 5000);
-        alert('Upload failed due to a network error. Your changes have NOT been saved.');
+        console.error('Autosave error', err);
+        document.getElementById('saveSubtitlesBtn').textContent = 'Save Error!';
+        showToast('Autosave failed: ' + err.message, 'error', 5000);
       }
     }
 
