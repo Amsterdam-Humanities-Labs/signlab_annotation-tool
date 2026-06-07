@@ -587,32 +587,9 @@
       fps = 60; // Explicitly set fps to 60 here
 
 
-      // Fetch zinArray based on filename
-      if (filename) {
-        try {
-          const zinResponse = await fetch(`getZinnen.php?action=fetchZinArrayByFilename&filename=${encodeURIComponent(filename)}`);
-          const zinData = await zinResponse.json();
-          if (zinData.success && zinData.zinArray) {
-            currentZinArray = zinData.zinArray; // Store the array
-            const sentence = currentZinArray.join(' ');
-            zinDisplayElement.textContent = sentence; // Display the sentence
-            if (zinData.sentenceRowId) {
-              currentSentenceRowId = zinData.sentenceRowId;
-            }
-          } else {
-            currentZinArray = []; // Reset if fetch fails
-            zinDisplayElement.textContent = 'Sentence not found.';
-            console.error('Failed to fetch sentence:', zinData.error);
-          }
-        } catch (error) {
-          currentZinArray = []; // Reset on error
-          zinDisplayElement.textContent = 'Error loading sentence.';
-          console.error('Error fetching sentence:', error);
-        }
-      } else {
-        currentZinArray = []; // Reset if no filename
-        zinDisplayElement.textContent = 'Filename not available.';
-      }
+      // Standalone: no sentence/zin metadata available without the server.
+      currentZinArray = [];
+      currentSentenceRowId = null;
 
 
       frames = [];
@@ -1992,41 +1969,7 @@ function updateSubtitleBoxDimensions(sub) {
 }
 
 
-    async function fetchSubtitlesFromServer() {
-      const params = new URLSearchParams(window.location.search);
-      const fileParam = params.get('filename') || '';
-      try {
-        const response = await fetch(`getZinnen.php?action=fetchSubtitles&filename=${encodeURIComponent(fileParam)}&_=${Date.now()}`);
-        const data = await response.json();
-        if (data.success && data.subtitles) {
-          console.log(data.subtitles)
 
-          subtitles = transformSubtitles(data.subtitles);
-
-          renderAll();
-
-          // Verify SRT file integrity on load
-          verifySubtitlesOnDisk();
-
-        } else { console.error('Failed to load subtitles', data.error); }
-      } catch (err) { console.error('Error fetching subtitles', err); }
-    }
-    fetchSubtitlesFromServer();
-
-    async function verifySubtitlesOnDisk() {
-      const params = new URLSearchParams(window.location.search);
-      const fileParam = params.get('filename') || '';
-      if (!fileParam) return;
-      try {
-        const response = await fetch(`getZinnen.php?action=verifySubtitles&filename=${encodeURIComponent(fileParam)}`);
-        const data = await response.json();
-        if (data.success && data.verified === false && data.mismatches) {
-          console.warn('SRT mismatch detected:', data.mismatches);
-        }
-      } catch (err) {
-        console.error('Verification error', err);
-      }
-    }
 
     function showToast(message, type = 'success', duration = 2500) {
       const container = document.getElementById('toast-container');
@@ -2044,65 +1987,11 @@ function updateSubtitleBoxDimensions(sub) {
     // Track whether there are unsaved changes
     let hasUnsavedChanges = false;
 
-    // Auto-save when leaving with unsaved changes
-    let isSavingBeforeUnload = false;
     window.addEventListener('beforeunload', function(e) {
-      if (hasUnsavedChanges && !isSavingBeforeUnload) {
-        // Send synchronous save via sendBeacon as last resort
-        const params = new URLSearchParams(window.location.search);
-        const fileParam = (params.get('filename') || '').replace(/\s+/g, '_');
-        if (fileParam) {
-          const blob = new Blob([JSON.stringify({ subtitles: subtitles })], { type: 'application/json' });
-          navigator.sendBeacon('getZinnen.php?action=saveSubtitlesAndEAFFiles&filename=' + encodeURIComponent(fileParam), blob);
-        }
-      }
+      if (hasUnsavedChanges) { e.preventDefault(); e.returnValue = ''; }
     });
 
-    // Intercept navigation links to save before leaving
-    document.addEventListener('click', function(e) {
-      const link = e.target.closest('a[href]');
-      if (!link || !hasUnsavedChanges) return;
-      const href = link.getAttribute('href');
-      if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
 
-      e.preventDefault();
-      isSavingBeforeUnload = true;
-      saveAndNavigate(href);
-    });
-
-    async function saveAndNavigate(destination) {
-      $('#savingModal').modal('show');
-      try {
-        clearTimeout(autosaveTimer);
-        await performUpload();
-        document.getElementById('savingModalMessage').textContent = 'Opgeslagen!';
-        setTimeout(() => { window.location.href = destination; }, 400);
-      } catch (err) {
-        document.getElementById('savingModalMessage').textContent = 'Opslaan mislukt!';
-        setTimeout(() => {
-          $('#savingModal').modal('hide');
-          isSavingBeforeUnload = false;
-          if (confirm('Opslaan is mislukt. Toch de pagina verlaten?')) {
-            hasUnsavedChanges = false;
-            window.location.href = destination;
-          }
-        }, 1000);
-      }
-    }
-
-    // Handle browser back/forward buttons
-    window.addEventListener('popstate', function(e) {
-      if (hasUnsavedChanges) {
-        saveAndNavigate(document.location.href);
-      }
-    });
-
-    // Verify SRT integrity when user returns to the tab
-    document.addEventListener('visibilitychange', function() {
-      if (document.visibilityState === 'visible' && !hasUnsavedChanges) {
-        verifySubtitlesOnDisk();
-      }
-    });
 
     // Debounced autosave function
     function uploadSubtitles() {
