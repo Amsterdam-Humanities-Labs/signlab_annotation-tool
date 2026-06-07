@@ -330,7 +330,6 @@
 
   <!-- Canvas Preview and Controls -->
   <div class="middle-bar container text-center my-3">
-    <div id="zinDisplay" style="font-size: 1.2em; margin-bottom: 10px; font-weight: bold;">Loading sentence...</div> <!-- Added div for zinArray -->
     <div class="headRow">
       <div class="headCol">
          <!-- Re-added canvasLeft and canvasRight -->
@@ -530,7 +529,6 @@
     let smartSearchEnabled = false;  // Track if smart search is active
     let lastHandshapeData = null;    // Cache handshape recognition result
     let currentSentenceRowId = null; // Store sentence row ID for status saves
-    const zinDisplayElement = document.getElementById('zinDisplay'); // Get the display element
 
     // Toggle side canvases visibility
     document.getElementById('toggleSideCanvasBtn').addEventListener('click', function() {
