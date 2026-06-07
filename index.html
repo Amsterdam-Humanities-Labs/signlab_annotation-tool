@@ -806,7 +806,7 @@
     currentTimeLine.style.position = "absolute";
     currentTimeLine.style.top = "20px"; // Start below the arrow
     currentTimeLine.style.width = "2px";
-    currentTimeLine.style.height = "240px"; // Height to cover all 3 tiers (3 * 80px)
+    currentTimeLine.style.height = (tierRows() * TIER_HEIGHT) + "px"; // covers all tiers; kept in sync in renderAll
     currentTimeLine.style.backgroundColor = "red";
     currentTimeLine.style.pointerEvents = "none";
     currentTimeLine.style.zIndex = "9999"; // Just below the arrow
@@ -963,6 +963,9 @@ function updateSubtitleBoxDimensions(sub) {
       const timelineTrack = document.getElementById('timelineTrack');
       timelineTrack.innerHTML = "";
       timelineTrack.style.height = (tierRows() * TIER_HEIGHT) + "px";
+      // Keep the current-time playhead as tall as the current number of tiers
+      const ctl = document.getElementById('currentTimeLine');
+      if (ctl) ctl.style.height = (tierRows() * TIER_HEIGHT) + "px";
       if (waitingForEnd) timelineTrack.appendChild(pendingPreviewDiv);
       // Render one background row + label per dynamic tier
       tiers.forEach((t, idx) => {
@@ -2909,20 +2912,31 @@ ${tierXml}
       tiers.forEach(t => {
         const chip = document.createElement('span');
         chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-right:6px;font-size:12px;';
+        const renameTier = () => {
+          const name = prompt('Rename tier', t.name);
+          if (name && name.trim()) {
+            t.name = name.trim();
+            rebuildTierControls(); renderAll(); uploadSubtitles();
+          }
+        };
         const label = document.createElement('span');
         label.textContent = t.name;
-        label.title = 'Double-click to rename';
+        label.title = 'Double-click or use the ✎ button to rename';
         label.style.cursor = 'pointer';
-        label.ondblclick = () => {
-          const name = prompt('Rename tier', t.name);
-          if (name && name.trim()) { t.name = name.trim(); rebuildTierControls(); renderAll(); }
-        };
+        label.ondblclick = renameTier;
+        const rename = document.createElement('button');
+        rename.textContent = '✎';
+        rename.title = 'Rename tier';
+        rename.className = 'btn btn-sm btn-outline-secondary';
+        rename.style.cssText = 'padding:0 5px;line-height:1;';
+        rename.onclick = renameTier;
         const del = document.createElement('button');
         del.textContent = '×';
+        del.title = 'Delete tier';
         del.className = 'btn btn-sm btn-outline-danger';
         del.style.cssText = 'padding:0 5px;line-height:1;';
         del.onclick = () => removeTier(t.id);
-        chip.appendChild(label); chip.appendChild(del);
+        chip.appendChild(label); chip.appendChild(rename); chip.appendChild(del);
         wrap.appendChild(chip);
       });
     }
