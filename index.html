@@ -1815,17 +1815,9 @@ function updateSubtitleBoxDimensions(sub) {
       }
     }
     function downloadSubtitle() {
-      //get filename parameter from url
-      const params = new URLSearchParams(window.location.search);
-      let filename = params.get('filename');
-      if (filename) {
-        filename = filename.replace(/\.wav$/, '');
-      }
-
-
-      const trackNames = ["Gebaar-voor-Gebaar", "Nederlands", "Signbank ID glossen"];
-      trackNames.forEach((trackName, tid) => {
-        const subsForTrack = subtitles.filter(sub => sub.tier === tid);
+      const base = (videoFileName || 'annotation').replace(/\.[^.]+$/, '');
+      tiers.forEach(t => {
+        const subsForTrack = subtitles.filter(sub => sub.tierId === t.id);
         if (!subsForTrack.length) return;
         let vtt = "WEBVTT\n\n";
         subsForTrack.forEach((sub, idx) => {
@@ -1837,7 +1829,7 @@ function updateSubtitleBoxDimensions(sub) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${filename} ${trackName}.vtt`;
+        a.download = `${base} ${t.name}.vtt`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -1933,45 +1925,7 @@ function updateSubtitleBoxDimensions(sub) {
 }
 
     let transformed = [];
-    function transformSubtitles(rawSubtitles) {
-  const trackMapping = { 
-    'Nederlands': 0, 
-    'Gebaar-voor-Gebaar': 1, 
-    'Signbank ID glossen': 2 
-  };
 
-  const transformed = [];
-  Object.keys(rawSubtitles).forEach(trackKey => {
-    const tier = trackMapping[trackKey] || 0;
-    const data = rawSubtitles[trackKey];
-    if (!data || data.length === 0) return;
-
-    if (Array.isArray(data)) {
-      uniqueId++;
-      const { start, end } = parseTimeRange(data[1]);
-      const text = data[2] || '';
-      transformed.push({ id: uniqueId, text, start, end, tier, committed: true });
-    } else if (typeof data === 'object') {
-      const keys = Object.keys(data).filter(k => !isNaN(k)).sort((a, b) => parseInt(a) - parseInt(b));
-      for (let i = 0; i < keys.length; i += 3) {
-        uniqueId++;
-        const timing = data[keys[i + 1]];
-        const { start, end } = parseTimeRange(timing);
-        const text = data[keys[i + 2]] || '';
-        transformed.push({ id: uniqueId, text, start, end, tier, committed: true });
-      }
-    }
-  });
-
-  // Assign unique id based on tier order
-  const tierCounters = {};
-  transformed.forEach(sub => {
-    tierCounters[sub.tier] = (tierCounters[sub.tier] || 0) + 1;
-    sub.id = `tier${sub.tier}_${tierCounters[sub.tier]}`;
-  });
-  console.log(transformed)
-  return transformed;
-}
 
 
 
@@ -2657,6 +2611,7 @@ ${tierXml}
     // Replace all tier 2 subtitles
     function replaceTier2Subtitles(segments) {
       const tier2Id = tiers[2] && tiers[2].id;
+      if (!tier2Id) return;
       // Backup original tier 2 subtitles before replacing
       originalTier2Subtitles = subtitles.filter(sub => sub.tierId === tier2Id).map(sub => ({...sub}));
 
