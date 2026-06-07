@@ -42,6 +42,9 @@
       background: #f3f3f3;
       /* Assuming add-bar is roughly 50px high */
     }
+    /* Highlight the drop overlay while a file is being dragged over the window */
+    #dropOverlay.drag-active { background: rgba(28,40,72,.96); box-shadow: inset 0 0 0 4px #6faaff; }
+    #dropOverlay.drag-active h2 { color: #9cc4ff; }
     .timeline-container {
       position: relative;
       background: #eee;
@@ -517,6 +520,7 @@
     let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
     let videoBlob = null;     // the loaded video File/Blob, copied into the work folder so sessions can be restored
     let videoSavedToDir = false; // whether videoBlob has already been written to the work folder this session
+    let videoLoaded = false;  // true once a video's frames are loaded (controls whether the drag overlay auto-hides)
 
     let tierUid = 0;
     let tiers = [{ id: ++tierUid, name: 'Tier 1' }]; // dynamic 1..N
@@ -825,11 +829,12 @@
           frame.close();
         },
         onConfig(config) {},
-        onFinish() { 
-          console.log("Finished loading frames:", frames.length); 
+        onFinish() {
+          console.log("Finished loading frames:", frames.length);
+          videoLoaded = true; // a video is now loaded; the drag overlay may auto-hide on drag-leave
           // Update timeline width and render everything *after* all frames are loaded
-          updateTimelineWidth(); 
-          renderAll(); 
+          updateTimelineWidth();
+          renderAll();
           //onclick on button id normal
           document.querySelector('.speed-btn[data-speed="1"]').click();
         }
@@ -3635,9 +3640,33 @@ document.addEventListener('mousedown', function(e) {
     // End of scroll synchronization section
 
     // Drag-and-drop / file picker for video + EAF
+    // Show the big drop box whenever a file is dragged over the window, so the user gets
+    // clear feedback that dropping works — for both video and EAF, even after a video is loaded.
+    let dragDepth = 0;
+    const dragHasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    const dropOverlayEl = () => document.getElementById('dropOverlay');
+    const eafBoxOpen = () => document.getElementById('eafDropBox').style.display === 'flex';
+    window.addEventListener('dragenter', e => {
+      if (!dragHasFiles(e) || eafBoxOpen()) return; // the manual EAF box handles its own drag
+      dragDepth++;
+      dropOverlayEl().style.display = 'flex';
+      dropOverlayEl().classList.add('drag-active');
+    });
+    window.addEventListener('dragleave', e => {
+      if (!dragHasFiles(e) || eafBoxOpen()) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) {
+        dropOverlayEl().classList.remove('drag-active');
+        if (videoLoaded) dropOverlayEl().style.display = 'none'; // keep showing before the first video
+      }
+    });
     ['dragover','drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
     document.addEventListener('drop', e => {
-      if (e.dataTransfer && e.dataTransfer.files.length) handleDroppedFiles(e.dataTransfer.files);
+      dragDepth = 0;
+      dropOverlayEl().classList.remove('drag-active');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) handleDroppedFiles(files);
+      else if (videoLoaded) dropOverlayEl().style.display = 'none';
     });
     document.getElementById('filePicker').addEventListener('change', e => {
       if (e.target.files.length) handleDroppedFiles(e.target.files);
