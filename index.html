@@ -487,6 +487,8 @@
     const TIER_HEIGHT = 80;
     let videoDuration = 5, subtitles = [], uniqueId = 0;
     let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
+    let videoBlob = null;     // the loaded video File/Blob, copied into the work folder so sessions can be restored
+    let videoSavedToDir = false; // whether videoBlob has already been written to the work folder this session
 
     let tierUid = 0;
     let tiers = [{ id: ++tierUid, name: 'Tier 1' }]; // dynamic 1..N
@@ -580,8 +582,11 @@
       }
       if (videoFile) {
         videoFileName = videoFile.name;
+        videoBlob = videoFile;
+        videoSavedToDir = false; // fresh video — copy it to the work folder on next save
         document.getElementById('dropOverlay').style.display = 'none';
         await start(videoFile);
+        uploadSubtitles(); // trigger a save so the video is copied into the work folder
       } else if (eafFile) {
         // EAF only: hide overlay so the user can review/edit annotations
         document.getElementById('dropOverlay').style.display = 'none';
@@ -2000,6 +2005,16 @@ function updateSubtitleBoxDimensions(sub) {
         const writable = await fileHandle.createWritable();
         await writable.write(buildEAF(videoFileName));
         await writable.close();
+        // Copy the video into the work folder once, so the session (video + EAF) can be fully restored later.
+        if (videoBlob && !videoSavedToDir) {
+          videoSavedToDir = true; // set first to guard against a concurrent debounced save writing it twice
+          try {
+            const vh = await dir.getFileHandle(base + '.mp4', { create: true });
+            const vw = await vh.createWritable();
+            await vw.write(videoBlob);
+            await vw.close();
+          } catch (e) { videoSavedToDir = false; console.warn('Could not copy video into work folder:', e); }
+        }
         hasUnsavedChanges = false;
         document.getElementById('saveSubtitlesBtn').textContent = 'Autosave Enabled';
         showToast('Saved ' + base + '.eaf', 'success');
@@ -3430,17 +3445,27 @@ document.addEventListener('mousedown', function(e) {
         if (!confirm('Restore last session from ' + latest.name + '?')) return;
         loadEAFString(await latest.file.text());
 
-        // If a matching video sits in the same folder, offer to load it
+        // If a matching video sits in the same folder, reload it; otherwise prompt for it.
         const base = latest.name.replace(/\.eaf$/i, '');
+        let videoRestored = false;
         for await (const [name, handle] of cached.entries()) {
           if (handle.kind === 'file' && name.toLowerCase().startsWith(base.toLowerCase()) &&
               name.toLowerCase().endsWith('.mp4')) {
             const vf = await handle.getFile();
             videoFileName = vf.name;
+            videoBlob = vf;
+            videoSavedToDir = true; // already present in the folder
             document.getElementById('dropOverlay').style.display = 'none';
             await start(vf);
+            videoRestored = true;
             break;
           }
+        }
+        if (!videoRestored) {
+          // Annotations are loaded but no video is in the folder — keep the overlay and explain.
+          const h = document.querySelector('#dropOverlay h2');
+          if (h) h.textContent = 'Annotations from "' + latest.name + '" restored. Drop the video to load the footage.';
+          showToast('Annotations restored — drop the matching video to see the footage.', 'success', 6000);
         }
       } catch (err) { console.warn('Restore skipped:', err); }
     }
