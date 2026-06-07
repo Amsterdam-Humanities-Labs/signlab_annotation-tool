@@ -2090,6 +2090,51 @@ function updateSubtitleBoxDimensions(sub) {
       return { tiers: outTiers, subtitles: outSubs, nextTierUid: localTierUid, nextSubId: localSubId };
     }
 
+    // Build a valid ELAN .eaf XML string from current tiers + subtitles.
+    // videoFileName is the dropped video's name (for MEDIA_DESCRIPTOR).
+    function buildEAF(videoFileName) {
+      // Collect unique time points (ms) -> slot ids
+      const times = [];
+      subtitles.forEach(s => { times.push(Math.round(s.start * 1000), Math.round(s.end * 1000)); });
+      const uniq = Array.from(new Set(times)).sort((a, b) => a - b);
+      const slotId = {};
+      uniq.forEach((ms, i) => { slotId[ms] = 'ts' + (i + 1); });
+
+      const esc = s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+      let annId = 0;
+      const timeSlots = uniq.map(ms => `        <TIME_SLOT TIME_SLOT_ID="${slotId[ms]}" TIME_VALUE="${ms}"/>`).join('\n');
+
+      const tierXml = tiers.map(t => {
+        const rows = subtitles.filter(s => s.tierId === t.id).map(s => {
+          const a1 = slotId[Math.round(s.start * 1000)];
+          const a2 = slotId[Math.round(s.end * 1000)];
+          return `        <ANNOTATION>
+            <ALIGNABLE_ANNOTATION ANNOTATION_ID="a${++annId}" TIME_SLOT_REF1="${a1}" TIME_SLOT_REF2="${a2}">
+                <ANNOTATION_VALUE>${esc(s.text)}</ANNOTATION_VALUE>
+            </ALIGNABLE_ANNOTATION>
+        </ANNOTATION>`;
+        }).join('\n');
+        return `    <TIER LINGUISTIC_TYPE_REF="default-lt" TIER_ID="${esc(t.name)}">
+${rows}
+    </TIER>`;
+      }).join('\n');
+
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<ANNOTATION_DOCUMENT AUTHOR="" DATE="2026-06-07T00:00:00+00:00" FORMAT="3.0" VERSION="3.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.mpi.nl/tools/elan/EAFv3.0.xsd">
+    <HEADER MEDIA_FILE="" TIME_UNITS="milliseconds">
+        <MEDIA_DESCRIPTOR MEDIA_URL="${esc(videoFileName || '')}" MIME_TYPE="video/mp4"/>
+    </HEADER>
+    <TIME_ORDER>
+${timeSlots}
+    </TIME_ORDER>
+${tierXml}
+    <LINGUISTIC_TYPE GRAPHIC_REFERENCES="false" LINGUISTIC_TYPE_ID="default-lt" TIME_ALIGNABLE="true"/>
+</ANNOTATION_DOCUMENT>`;
+    }
+
     function loadEAFString(xmlString) {
       const parsed = parseEAF(xmlString);
       tiers = parsed.tiers;
