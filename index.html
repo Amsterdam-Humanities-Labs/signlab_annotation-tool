@@ -645,6 +645,7 @@
       // Set timelineTrack width based on duration and current scale
       const totalWidth = videoDuration * pixelsPerSecond;
       document.getElementById('timelineTrack').style.width = totalWidth + "px";
+      document.getElementById('timelineTrack').style.height = (tierRows() * TIER_HEIGHT) + "px";
       // Also update the time ruler width to match
       document.getElementById('timeRuler').style.width = totalWidth + "px";
       // Update custom scrollbar content width
@@ -740,11 +741,11 @@
     }
     function updateSubtitleTrack() {
   const overlay = document.getElementById('videoSubtitleOverlay');
-  const tier1Sub = subtitles.find(
-    sub => sub.tier === 1 && currentTime >= sub.start && currentTime <= sub.end
+  const tier1Sub = tiers[1] && subtitles.find(
+    sub => sub.tierId === tiers[1].id && currentTime >= sub.start && currentTime <= sub.end
   );
-  const tier2Sub = subtitles.find(
-    sub => sub.tier === 2 && currentTime >= sub.start && currentTime <= sub.end
+  const tier2Sub = tiers[2] && subtitles.find(
+    sub => sub.tierId === tiers[2].id && currentTime >= sub.start && currentTime <= sub.end
   );
   
   overlay.innerHTML = "";
@@ -940,7 +941,7 @@ function updateSubtitleBoxDimensions(sub) {
   if (box) {
     box.style.left = timeToPx(sub.start) + 'px';
     box.style.width = timeToPx(sub.end - sub.start) + 'px';
-    box.style.top = (sub.tier * TIER_HEIGHT) + 'px';
+    box.style.top = tierRowTop(sub.tierId) + 'px';
   }
 }
 
@@ -951,21 +952,20 @@ function updateSubtitleBoxDimensions(sub) {
       const timelineTrack = document.getElementById('timelineTrack');
       timelineTrack.innerHTML = "";
       if (waitingForEnd) timelineTrack.appendChild(pendingPreviewDiv);
-      // Swap the first two divs by changing the order of labels
-      const tracks = ["Nederlands", "Gebaar-voor-Gebaar", "Signbank ID glossen"];
-      tracks.forEach((label, index) => {
-        if (!(tiers[index] && tierVisible(tiers[index].id))) return;
+      // Render one background row + label per dynamic tier
+      tiers.forEach((t, idx) => {
+        if (!tierVisible(t.id)) return;
         const bg = document.createElement('div');
         bg.style.position = 'absolute';
         bg.className = 'tier-label';
-        bg.style.top = (index * TIER_HEIGHT) + 'px';
+        bg.style.top = (idx * TIER_HEIGHT) + 'px';
         bg.style.left = '0';
         bg.style.width = '100%';
         bg.style.height = TIER_HEIGHT + 'px';
         bg.style.backgroundColor = '#ddd';
         bg.style.opacity = '0.3';
         bg.style.zIndex = '100';
-        bg.innerText = label;
+        bg.innerText = t.name;
         bg.style.fontSize = '12px';
         bg.style.lineHeight = TIER_HEIGHT + 'px';
         bg.style.paddingLeft = '5px';
@@ -975,12 +975,12 @@ function updateSubtitleBoxDimensions(sub) {
       });
       subtitles.forEach(sub => {
         // Skip rendering if this tier is hidden
-        if (!tierVisible(sub.tier)) return;
+        if (!tierVisible(sub.tierId)) return;
         const box = document.createElement('div');
         box.className = 'subtitle-box';
         box.style.left = timeToPx(sub.start) + 'px';
         box.style.width = timeToPx(sub.end - sub.start) + 'px';
-        box.style.top = (sub.tier * TIER_HEIGHT) + 'px';
+        box.style.top = tierRowTop(sub.tierId) + 'px';
         box.style.height = TIER_HEIGHT + 'px';
         box.dataset.id = sub.id;
         box.style.backgroundColor = sub.committed ? 'gray' : 'white';
@@ -1067,7 +1067,7 @@ function updateSubtitleBoxDimensions(sub) {
               busyMoving = 1;
               updateThreeCanvases(sub);
           }
-          if (sub.tier === 2) {
+          if (tiers[2] && sub.tierId === tiers[2].id) {
             let query = content.textContent.trim().toLowerCase();
             if (query) {
               const matches = glosses.filter(entry => 
@@ -1096,7 +1096,7 @@ function updateSubtitleBoxDimensions(sub) {
           renderAll();
         });
         box.appendChild(content);
-        if (sub.tier === 2) {
+        if (tiers[2] && sub.tierId === tiers[2].id) {
           const glossaryDD = document.createElement('div');
           glossaryDD.className = 'glossary-dropdown';
           glossaryDD.style.position = 'absolute';
@@ -1492,7 +1492,7 @@ function updateSubtitleBoxDimensions(sub) {
       e.stopPropagation();
       dragActive = true; dragId = id;
       dragStartX = e.clientX; dragStartY = e.clientY;
-      origStart = sub.start; origTier = sub.tier; duration = sub.end - sub.start;
+      origStart = sub.start; origTier = tierIndexById(sub.tierId); duration = sub.end - sub.start;
       busyMoving = 1; // Set busyMoving flag
       document.addEventListener('mousemove', onDrag);
       document.addEventListener('mouseup', endDrag);
@@ -1507,7 +1507,8 @@ function updateSubtitleBoxDimensions(sub) {
   sub.start = newStart;
   sub.end = newStart + duration;
   let newTier = origTier + Math.round(dy / TIER_HEIGHT);
-  sub.tier = Math.min(Math.max(0, newTier), 2);
+  const rowIdx = Math.max(0, Math.min(tiers.length - 1, newTier));
+  sub.tierId = tiers[rowIdx].id;
   syncTwin(sub); // sync master/twin values
   updateSubtitleBoxDimensions(sub);
   // Update twin/master box if applicable:
@@ -1729,22 +1730,25 @@ function updateSubtitleBoxDimensions(sub) {
         let newStart = pendingStartTime;
         let newEnd = currentTimeForAdd;
         if (newEnd <= newStart) newEnd = newStart + 0.2;
-        // Updated: For sync, use tier1 (master) and tier2 as twin.
-        if (tier === 1 || tier === 2) {
-          if (syncEnabled) {
+        // Clamp the dropped row index to a valid tier and resolve its id.
+        const dropRowIdx = Math.max(0, Math.min(tiers.length - 1, tier));
+        const dropTierId = tiers[dropRowIdx].id;
+        // Updated: For sync, use row 1 (master) and row 2 as twin.
+        if (dropRowIdx === 1 || dropRowIdx === 2) {
+          if (syncEnabled && tiers[1] && tiers[2]) {
             uniqueId++;
-            const master = { id: uniqueId, text: '', start: newStart, end: newEnd, tier: 1, committed: false };
+            const master = { id: uniqueId, text: '', start: newStart, end: newEnd, tierId: tiers[1].id, committed: false };
             uniqueId++;
-            const twin = { id: uniqueId, text: '', start: newStart, end: newEnd, tier: 2, committed: false, masterId: master.id };
+            const twin = { id: uniqueId, text: '', start: newStart, end: newEnd, tierId: tiers[2].id, committed: false, masterId: master.id };
             master.cloneId = twin.id;
             subtitles.push(master, twin);
           } else {
             uniqueId++;
-            subtitles.push({ id: uniqueId, text: '', start: newStart, end: newEnd, tier: tier, committed: false });
+            subtitles.push({ id: uniqueId, text: '', start: newStart, end: newEnd, tierId: dropTierId, committed: false });
           }
         } else {
           uniqueId++;
-          subtitles.push({ id: uniqueId, text: '', start: newStart, end: newEnd, tier: tier, committed: false });
+          subtitles.push({ id: uniqueId, text: '', start: newStart, end: newEnd, tierId: dropTierId, committed: false });
         }
         pendingStartTime = null; waitingForEnd = false;
         timelineAddButton.style.display = 'none';
@@ -1764,11 +1768,11 @@ function updateSubtitleBoxDimensions(sub) {
     function syncTwin(updatedSub) {
       if (!syncEnabled) return;
       let master, twin;
-      // Updated: master is now in tier1 and twin in tier2
-      if (updatedSub.tier === 1) {
+      // Updated: master is now in row 1 and twin in row 2
+      if (tiers[1] && updatedSub.tierId === tiers[1].id) {
         master = updatedSub;
         twin = subtitles.find(s => s.id === updatedSub.cloneId);
-      } else if (updatedSub.tier === 2) {
+      } else if (tiers[2] && updatedSub.tierId === tiers[2].id) {
         twin = updatedSub;
         master = subtitles.find(s => s.id === updatedSub.masterId);
       }
@@ -2529,11 +2533,12 @@ function updateSubtitleBoxDimensions(sub) {
 
     // Replace all tier 2 subtitles
     function replaceTier2Subtitles(segments) {
+      const tier2Id = tiers[2] && tiers[2].id;
       // Backup original tier 2 subtitles before replacing
-      originalTier2Subtitles = subtitles.filter(sub => sub.tier === 2).map(sub => ({...sub}));
+      originalTier2Subtitles = subtitles.filter(sub => sub.tierId === tier2Id).map(sub => ({...sub}));
 
       // Remove all existing tier 2 subtitles
-      subtitles = subtitles.filter(sub => sub.tier !== 2);
+      subtitles = subtitles.filter(sub => sub.tierId !== tier2Id);
 
       // Add new segments to tier 2
       segments.forEach(segment => {
@@ -2543,7 +2548,7 @@ function updateSubtitleBoxDimensions(sub) {
           text: segment.text, // Empty string
           start: segment.start,
           end: segment.end,
-          tier: 2, // Signbank ID glossen
+          tierId: tier2Id, // Signbank ID glossen
           committed: true
         });
       });
@@ -2560,7 +2565,7 @@ function updateSubtitleBoxDimensions(sub) {
       }
 
       // Remove current tier 2 subtitles
-      subtitles = subtitles.filter(sub => sub.tier !== 2);
+      subtitles = subtitles.filter(sub => sub.tierId !== (tiers[2] && tiers[2].id));
 
       // Restore original tier 2 subtitles
       originalTier2Subtitles.forEach(sub => {
@@ -3226,7 +3231,7 @@ document.addEventListener('mousedown', function(e) {
 
       // Get all subtitles in the same tier, sorted by start time
       const sameTier = subtitles
-        .filter(s => s.tier === currentSub.tier)
+        .filter(s => s.tierId === currentSub.tierId)
         .sort((a, b) => a.start - b.start);
       const currentIndex = sameTier.findIndex(s => String(s.id) === String(currentId));
       if (currentIndex === -1) return;
