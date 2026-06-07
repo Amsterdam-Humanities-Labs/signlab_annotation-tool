@@ -350,7 +350,6 @@
 
     <div class="control-buttons mt-2">
       <button id="playBtn" class="btn btn-success">(P) Play</button> <!-- Initial text updated -->
-      <button id="backToZinnenBtn" class="btn btn-info ml-2">Go back to Zinnen</button>
 
       <div class="btn-group ml-2 speedGroup" role="group" aria-label="Playback Speed">
         <!-- Update button text to include hotkeys -->
@@ -531,28 +530,6 @@
     let currentSentenceRowId = null; // Store sentence row ID for status saves
     const zinDisplayElement = document.getElementById('zinDisplay'); // Get the display element
 
-    // Add event listener for the "Go back to Zinnen" button
-    document.getElementById('backToZinnenBtn').addEventListener('click', function() {
-      // Get the URL parameters
-      const urlParams = new URLSearchParams(window.location.search);
-      const filename = urlParams.get('filename');
-      
-      // Check if we came from zinnen.html with state data
-      let returnUrl = 'zinnen.html';
-      
-      // If there are stored filters in localStorage, we'll use them to return to the same state
-      if (localStorage.getItem('zinnen_state')) {
-        // We'll let zinnen.html handle restoring state from localStorage
-      }
-      
-      // If we have a filename and we edited subtitles, consider adding a parameter to refresh the view
-      if (filename) {
-        returnUrl += `?edited=${filename}`;
-      }
-      
-      window.location.href = returnUrl;
-    });
-
     // Toggle side canvases visibility
     document.getElementById('toggleSideCanvasBtn').addEventListener('click', function() {
       sideCanvasesVisible = !sideCanvasesVisible;
@@ -658,7 +635,7 @@
           document.querySelector('.speed-btn[data-speed="1"]').click();
         }
       });
-      URL.revokeObjectURL(file);
+      URL.revokeObjectURL(videoUrl);
     };
 
     // Timeline scaling functions
@@ -2027,6 +2004,11 @@ function updateSubtitleBoxDimensions(sub) {
         document.getElementById('saveSubtitlesBtn').textContent = 'Autosave Enabled';
         showToast('Saved ' + base + '.eaf', 'success');
       } catch (err) {
+        if (err && err.name === 'AbortError') {
+          // User cancelled the folder picker — not an error.
+          document.getElementById('saveSubtitlesBtn').textContent = 'Autosave: pick folder';
+          return;
+        }
         console.error('Autosave error', err);
         document.getElementById('saveSubtitlesBtn').textContent = 'Save Error!';
         showToast('Autosave failed: ' + err.message, 'error', 5000);
@@ -3180,7 +3162,8 @@ let bewegingOptions = [
           return { id: key, ...item[key] };
         });
 
-      });
+      })
+      .catch(err => console.warn('Glossary load failed (gloss search disabled):', err));
 
 
       function filterGlosses(filterId, filterValue, container) {
