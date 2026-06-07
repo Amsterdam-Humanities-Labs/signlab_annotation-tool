@@ -326,6 +326,14 @@
   <p id="dropHint" style="margin-top:12px;opacity:.7;font-size:13px;">
     Chrome or Edge required (File System Access API for autosave).</p>
 </div>
+<div id="convertModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(20,20,30,.94);
+     color:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-family:sans-serif;">
+  <h3 id="convertLabel">Converting video…</h3>
+  <div style="width:60%;max-width:480px;background:#444;border-radius:6px;overflow:hidden;height:22px;margin-top:14px;">
+    <div id="convertBar" style="width:0%;height:100%;background:#4caf50;transition:width .15s ease;"></div>
+  </div>
+  <p style="margin-top:10px;opacity:.7;font-size:13px;">Normalizing to 25&nbsp;fps / 1080p to keep memory in check.</p>
+</div>
 <div id="toast-container"></div>
 
   <!-- Canvas Preview and Controls -->
@@ -480,7 +488,7 @@
 
 
   <script type="module">
-    import getVideoFrames from "./mod.js";
+    import getVideoFrames, { probeVideo } from "./mod.js";
 
     // Global state
     const TIER_HEIGHT = 80;
@@ -522,7 +530,7 @@
     let ctxLeft = canvasLeft.getContext('2d');
     let canvasRight = document.getElementById('canvasRight');
     let ctxRight = canvasRight.getContext('2d');
-    let frames = [], fps = 60, currentTime = 0;
+    let frames = [], fps = 25, currentTime = 0;
     let glosses = [];
     let currentZinArray = []; // Store the fetched zinArray globally
     let sideCanvasesVisible = true; // Track side canvas visibility
@@ -579,16 +587,146 @@
         catch (err) { alert('Could not parse EAF: ' + err.message); }
       }
       if (videoFile) {
-        videoFileName = videoFile.name;
-        videoBlob = videoFile;
-        videoSavedToDir = false; // fresh video — copy it to the work folder on next save
-        document.getElementById('dropOverlay').style.display = 'none';
-        await start(videoFile);
-        uploadSubtitles(); // trigger a save so the video is copied into the work folder
+        await prepareAndLoadVideo(videoFile); // probe, convert to 25fps/1080p if needed, guard memory, then load
       } else if (eafFile) {
         // EAF only: hide overlay so the user can review/edit annotations
         document.getElementById('dropOverlay').style.display = 'none';
       }
+    }
+
+    // ---- Video normalization (25fps / 1080p) + memory protection ----
+    const TARGET_FPS = 25;
+    const TARGET_W = 1920, TARGET_H = 1080;
+    const MAX_DECODE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB decode-memory ceiling (frames are kept as ImageBitmaps)
+    let ffmpegInstance = null;
+
+    function fitWithin(w, h, maxW, maxH) {
+      const s = Math.min(1, maxW / w, maxH / h);
+      let tw = Math.round(w * s), th = Math.round(h * s);
+      tw -= tw % 2; th -= th % 2; // even dimensions for yuv420p
+      return [Math.max(2, tw), Math.max(2, th)];
+    }
+    const gb = b => (b / (1024 * 1024 * 1024)).toFixed(1);
+
+    function showConvertModal(label, pct) {
+      document.getElementById('convertLabel').textContent = label;
+      document.getElementById('convertBar').style.width = (pct || 0) + '%';
+      document.getElementById('convertModal').style.display = 'flex';
+    }
+    function setConvertProgress(label, pct) {
+      if (label != null) document.getElementById('convertLabel').textContent = label;
+      if (pct != null) document.getElementById('convertBar').style.width = pct + '%';
+    }
+    function hideConvertModal() { document.getElementById('convertModal').style.display = 'none'; }
+
+    async function loadFFmpeg() {
+      if (ffmpegInstance) return ffmpegInstance;
+      if (!window.FFmpegWASM || !window.FFmpegUtil) throw new Error('converter library failed to load');
+      const { FFmpeg } = window.FFmpegWASM;
+      const ff = new FFmpeg();
+      setConvertProgress('Loading converter (one-time, ~30 MB)…', 0);
+      // Files are bundled same-origin, so plain URLs work (the worker importScripts them directly).
+      // classWorkerURL makes ffmpeg spawn a MODULE worker, which loads the core via
+      // `import(coreURL).default` — so coreURL must be the ESM core (has a default export).
+      await ff.load({
+        classWorkerURL: new URL('vendor/ffmpeg/814.ffmpeg.js', document.baseURI).href,
+        coreURL: new URL('vendor/ffmpeg/esm/ffmpeg-core.js', document.baseURI).href,
+        wasmURL: new URL('vendor/ffmpeg/esm/ffmpeg-core.wasm', document.baseURI).href,
+      });
+      ffmpegInstance = ff;
+      return ff;
+    }
+
+    // Convert a dropped video to 25fps, scaled to fit within 1920x1080, H.264. Shows a progress bar.
+    async function convertVideoWithProgress(file) {
+      showConvertModal('Loading converter…', 0);
+      const ff = await loadFFmpeg();
+      const { fetchFile } = window.FFmpegUtil;
+      const onProg = ({ progress }) => {
+        const pct = Math.max(0, Math.min(100, Math.round((progress || 0) * 100)));
+        setConvertProgress('Converting video… ' + pct + '%', pct);
+      };
+      ff.on('progress', onProg);
+      try {
+        setConvertProgress('Converting video… 0%', 0);
+        await ff.writeFile('input', await fetchFile(file));
+        await ff.exec([
+          '-i', 'input',
+          '-r', String(TARGET_FPS),
+          '-vf', "scale='min(" + TARGET_W + ",iw)':'min(" + TARGET_H + ",ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2",
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-an',
+          'output.mp4'
+        ]);
+        const data = await ff.readFile('output.mp4');
+        try { await ff.deleteFile('input'); await ff.deleteFile('output.mp4'); } catch (_) {}
+        setConvertProgress('Done', 100);
+        hideConvertModal();
+        const base = (file.name.replace(/\.[^.]+$/, '') || 'video');
+        return new File([data.buffer], base + '.mp4', { type: 'video/mp4' });
+      } finally {
+        if (ff.off) ff.off('progress', onProg);
+      }
+    }
+
+    // Orchestrates: probe -> memory guard -> convert if needed -> hand to the frame-decode pipeline.
+    async function prepareAndLoadVideo(file) {
+      const srcUrl = URL.createObjectURL(file);
+      let info = null;
+      try { info = await probeVideo(srcUrl); } catch (e) { console.warn('Video probe failed:', e); }
+
+      // Memory guard (uses the target dimensions + 25fps, since that's what actually gets decoded).
+      if (info && info.duration) {
+        const [tw, th] = fitWithin(info.width, info.height, TARGET_W, TARGET_H);
+        const estFrames = Math.max(1, Math.round(info.duration * TARGET_FPS));
+        const estBytes = tw * th * 4 * estFrames;
+        if (estBytes > MAX_DECODE_BYTES) {
+          URL.revokeObjectURL(srcUrl);
+          alert('This video would need about ' + gb(estBytes) + ' GB of memory to load (' +
+            estFrames + ' frames at ' + tw + '×' + th + '). The limit is ' + gb(MAX_DECODE_BYTES) +
+            ' GB to avoid crashing. Please use a shorter clip.');
+          return false;
+        }
+      }
+
+      const needsConvert = !info || Math.round(info.fps) !== TARGET_FPS || info.width > TARGET_W || info.height > TARGET_H;
+      let finalFile = file;
+      if (needsConvert) {
+        try {
+          finalFile = await convertVideoWithProgress(file);
+        } catch (e) {
+          hideConvertModal();
+          console.error('Conversion failed:', e);
+          alert('Video conversion failed: ' + (e && e.message ? e.message : e));
+          URL.revokeObjectURL(srcUrl);
+          return false;
+        }
+        // If we couldn't probe the source, guard on the converted output instead.
+        if (!info) {
+          try {
+            const outUrl = URL.createObjectURL(finalFile);
+            const outInfo = await probeVideo(outUrl);
+            URL.revokeObjectURL(outUrl);
+            const frames = outInfo.nbFrames || Math.round((outInfo.duration || 0) * TARGET_FPS);
+            const estBytes = outInfo.width * outInfo.height * 4 * Math.max(1, frames);
+            if (estBytes > MAX_DECODE_BYTES) {
+              URL.revokeObjectURL(srcUrl);
+              alert('This video would need about ' + gb(estBytes) + ' GB of memory to load. The limit is ' +
+                gb(MAX_DECODE_BYTES) + ' GB. Please use a shorter clip.');
+              return false;
+            }
+          } catch (_) { /* if we still can't probe, proceed — start() will surface any failure */ }
+        }
+      }
+      URL.revokeObjectURL(srcUrl);
+
+      // Hand off to the existing frame-decode pipeline.
+      videoFileName = (file.name.replace(/\.[^.]+$/, '') || 'video') + '.mp4';
+      videoBlob = finalFile;
+      videoSavedToDir = false; // fresh video — copy it to the work folder on next save
+      document.getElementById('dropOverlay').style.display = 'none';
+      await start(finalFile);
+      uploadSubtitles(); // trigger a save so the (normalized) video is copied into the work folder
+      return true;
     }
 
     // Load video frames from file
@@ -596,7 +734,7 @@
       const videoUrl = URL.createObjectURL(file);
       
       // Ensure fps is set to the base rate before loading frames
-      fps = 60; // Explicitly set fps to 60 here
+      fps = 25; // videos are normalized to 25fps in prepareAndLoadVideo before decoding
 
 
       // Standalone: no sentence/zin metadata available without the server.
@@ -3487,5 +3625,8 @@ document.addEventListener('mousedown', function(e) {
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
   <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <!-- ffmpeg.wasm (bundled locally) for normalizing dropped videos to 25fps/1080p. Tiny loaders; the ~30MB core loads lazily only when a conversion is needed. -->
+  <script src="vendor/ffmpeg/ffmpeg.js"></script>
+  <script src="vendor/ffmpeg/util.js"></script>
 </body>
 </html>
