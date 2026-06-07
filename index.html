@@ -400,8 +400,7 @@
   <!-- Timeline and Buttons -->
   <div class="bottom-bar">
     <div class="add-bar mb-2">
-      <button id="addSubtitleBtn" class="btn btn-primary">+ Add Subtitle</button>
-      <button id="dropEafBtn" class="btn btn-outline-primary" title="Import an EAF file">Drop EAF</button>
+      <button id="dropEafBtn" class="btn btn-primary" title="Import an EAF file">Drop EAF</button>
       <button class="btn btn-outline-secondary btn-sm" data-toggle="modal" data-target="#patternHelpModal" title="Search pattern help">Regex</button>
       <button id="downloadSubtitleBtn" class="btn btn-info">Download Subtitles</button>
       <button id="saveSubtitlesBtn" class="btn btn-success">Autosave Enabled</button> <!-- Updated button text -->
@@ -2324,14 +2323,6 @@ ${tierXml}
       if (typeof rebuildTierControls === 'function') rebuildTierControls();
     }
 
-    function addSubtitle() {
-      uniqueId++;
-      const newStart = 0, defaultDur = 0.2;
-      subtitles.push({ id: uniqueId, text: '', start: newStart, end: newStart + defaultDur, tierId: defaultTierId() });
-      // Removed save button text update
-      renderAll();
-      uploadSubtitles(); // Autosave after adding a new subtitle
-    }
 
     // New function to filter glosses based on senses
     function filterSensesList(searchTerm, container) {
@@ -3153,7 +3144,6 @@ ${tierXml}
 
     document.getElementById('saveSubtitlesBtn').addEventListener('click', uploadSubtitles);
     document.getElementById('downloadSubtitleBtn').addEventListener('click', downloadSubtitle);
-    document.getElementById('addSubtitleBtn').addEventListener('click', addSubtitle);
     document.getElementById('revertSegmentBtn').addEventListener('click', revertToOriginalSegments);
     document.getElementById('addTierBtn').addEventListener('click', addTier);
 
