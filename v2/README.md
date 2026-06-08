@@ -50,6 +50,13 @@ keeps working:
 - **Signbank video preview** — previews gloss videos from Signbank/Signcollect.
 - **Gloss glossary search** — works fully offline (the gloss data is bundled in
   `glosses_transformed.json`).
+- **Gloss spotting** (SignRep) — when a segment is created, the tool uploads the
+  video once and asks the inference server for the **top-10 NGT glosses** for that
+  segment, shown in a dropdown under the box (click to fill the annotation; ↻ to
+  re-run). Reaches `https://signcollect.nl/sign-spotter/` (Apache reverse-proxies
+  to a warm Python server; `infer_server.py` in the `signrep-spotter` repo). Fails
+  quietly when offline. Re-decoding a long video per segment is slow on CPU — best
+  for short clips; a GPU box or per-video frame cache is the throughput lever.
 
 ## Files in this directory (deployment)
 
