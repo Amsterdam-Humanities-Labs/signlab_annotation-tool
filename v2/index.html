@@ -913,6 +913,10 @@
         onFinish() {
           console.log("Finished loading frames:", frames.length);
           videoLoaded = true; // a video is now loaded; the drag overlay may auto-hide on drag-leave
+          // Pre-upload the normalized video to the inference server (once) so the
+          // first segment spot is fast. Fails quietly if the server is unreachable.
+          inferVideoId = null; inferUploadPromise = null;
+          ensureVideoUploaded().catch(e => console.warn('[spot] upload failed', e));
           // Update timeline width and render everything *after* all frames are loaded
           updateTimelineWidth();
           renderAll();
@@ -2024,6 +2028,7 @@ function updateSubtitleBoxDimensions(sub) {
         document.getElementById('timelineTrack').appendChild(pendingPreviewDiv);
         timelineContainer.addEventListener('mousemove', updatePreviewDiv);
       } else {
+        const beforeLen = subtitles.length;
         let newStart = pendingStartTime;
         let newEnd = currentTimeForAdd;
         if (newEnd <= newStart) newEnd = newStart + 0.2;
@@ -2051,6 +2056,7 @@ function updateSubtitleBoxDimensions(sub) {
         timelineAddButton.style.display = 'none';
         pendingPreviewDiv.style.display = 'none';
         timelineContainer.removeEventListener('mousemove', updatePreviewDiv);
+        subtitles.slice(beforeLen).filter(s => !s.masterId).forEach(s => runSpot(s));
         renderAll();
       }
     }
