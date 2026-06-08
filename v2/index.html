@@ -564,6 +564,70 @@
     let lastHandshapeData = null;    // Cache handshape recognition result
     let currentSentenceRowId = null; // Store sentence row ID for status saves
 
+    // ---- SignRep gloss spotting (v2) ----
+    // Same-origin HTTPS path on signcollect.nl (Apache reverse-proxies to the
+    // warm inference server); localhost for dev. Mirrors the ISS_Server pattern.
+    const INFER_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:8000'
+      : 'https://signcollect.nl/sign-spotter';
+    let inferVideoId = null;        // id returned by /upload for the current video
+    let inferUploadPromise = null;  // in-flight upload (so we upload only once)
+
+    async function inferUpload(blob) {
+      const r = await fetch(INFER_BASE + '/upload', { method: 'POST', body: blob });
+      if (!r.ok) throw new Error('upload_failed');
+      return (await r.json()).videoId;
+    }
+
+    async function inferSpot(videoId, start, end) {
+      const r = await fetch(INFER_BASE + '/spot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId, start, end, topk: 10 })
+      });
+      if (r.status === 409) throw new Error('no_video');
+      if (!r.ok) throw new Error('spot_failed');
+      return (await r.json()).glosses || [];
+    }
+
+    // Upload the current video once; resolve to its videoId (or null if no video).
+    async function ensureVideoUploaded() {
+      if (inferVideoId) return inferVideoId;
+      if (!videoBlob) return null;
+      if (!inferUploadPromise) {
+        inferUploadPromise = inferUpload(videoBlob)
+          .then(id => { inferVideoId = id; return id; })
+          .catch(e => { inferUploadPromise = null; throw e; });
+      }
+      return inferUploadPromise;
+    }
+
+    // Run gloss spotting for one segment, updating sub.spotState/spotResults and
+    // re-rendering. Supersedes any prior in-flight request for the same sub.
+    async function runSpot(sub, _retried) {
+      if (!INFER_BASE) return;
+      sub.spotState = 'loading';
+      sub.spotResults = null;
+      const reqId = (sub._spotReq = (sub._spotReq || 0) + 1);
+      renderAll();
+      try {
+        const vid = await ensureVideoUploaded();
+        if (!vid) { if (reqId === sub._spotReq) { sub.spotState = 'error'; renderAll(); } return; }
+        const glosses = await inferSpot(vid, sub.start, sub.end);
+        if (reqId !== sub._spotReq) return; // superseded by a newer re-run
+        sub.spotState = 'done';
+        sub.spotResults = glosses;
+        renderAll();
+      } catch (err) {
+        if (err && err.message === 'no_video' && !_retried) {
+          inferVideoId = null; inferUploadPromise = null; // server lost it; re-upload
+          return runSpot(sub, true);
+        }
+        console.warn('[spot] failed', err);
+        if (reqId === sub._spotReq) { sub.spotState = 'error'; renderAll(); }
+      }
+    }
+
     // Toggle side canvases visibility
     document.getElementById('toggleSideCanvasBtn').addEventListener('click', function() {
       sideCanvasesVisible = !sideCanvasesVisible;
