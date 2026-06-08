@@ -59,6 +59,22 @@
       /* width: 100%; */ /* Width is set dynamically by JS */
       min-height: 200px; /* Keep min-height */
     }
+    .spot-panel { position: absolute; left: 0; min-width: 200px; max-width: 320px;
+      background: #fff; border: 1px solid #007bff; border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.25); font-size: 12px; }
+    .spot-spinner { width: 18px; height: 18px; margin: 6px auto; border: 3px solid #cfe2ff;
+      border-top-color: #007bff; border-radius: 50%; animation: spot-spin .8s linear infinite; }
+    @keyframes spot-spin { to { transform: rotate(360deg); } }
+    .spot-hdr { display: flex; justify-content: space-between; align-items: center;
+      padding: 2px 6px; font-weight: bold; color: #333; border-bottom: 1px solid #eee; }
+    .spot-list { max-height: 200px; overflow-y: auto; }
+    .spot-item { display: flex; justify-content: space-between; gap: 8px;
+      padding: 2px 6px; cursor: pointer; }
+    .spot-item:hover { background: #007bff; color: #fff; }
+    .spot-score { color: #888; }
+    .spot-item:hover .spot-score { color: #cfe2ff; }
+    .spot-error { padding: 4px 6px; color: #b00; display: flex; align-items: center; gap: 6px; }
+    .spot-rerun { border: none; background: transparent; cursor: pointer; font-size: 13px; }
     .subtitle-box {
       position: absolute;
       background-color: rgba(0,0,0,0.3);
@@ -626,6 +642,71 @@
         console.warn('[spot] failed', err);
         if (reqId === sub._spotReq) { sub.spotState = 'error'; renderAll(); }
       }
+    }
+
+    // Build the panel shown under a box for its current spot state.
+    function buildSpotPanel(sub) {
+      const p = document.createElement('div');
+      p.className = 'spot-panel';
+      // Sit below the box, clearing the hover delete/loop row (~22px).
+      p.style.top = (TIER_HEIGHT + 24) + 'px';
+      p.style.zIndex = '1004';
+      // Don't let clicks inside the panel start a box drag / time scrub.
+      p.addEventListener('mousedown', ev => ev.stopPropagation());
+
+      const rerun = () => {
+        const b = document.createElement('button');
+        b.className = 'spot-rerun';
+        b.title = 'Re-run spotting';
+        b.textContent = '↻';
+        b.addEventListener('mousedown', ev => { ev.preventDefault(); ev.stopPropagation(); runSpot(sub); });
+        return b;
+      };
+
+      if (sub.spotState === 'loading') {
+        const s = document.createElement('div');
+        s.className = 'spot-spinner';
+        p.appendChild(s);
+      } else if (sub.spotState === 'error') {
+        const e = document.createElement('div');
+        e.className = 'spot-error';
+        e.textContent = 'spotting failed';
+        e.appendChild(rerun());
+        p.appendChild(e);
+      } else if (sub.spotState === 'done') {
+        const hdr = document.createElement('div');
+        hdr.className = 'spot-hdr';
+        const t = document.createElement('span');
+        t.textContent = 'top 10';
+        hdr.appendChild(t);
+        hdr.appendChild(rerun());
+        p.appendChild(hdr);
+        const list = document.createElement('div');
+        list.className = 'spot-list';
+        (sub.spotResults || []).forEach(g => {
+          const it = document.createElement('div');
+          it.className = 'spot-item';
+          const name = document.createElement('span');
+          name.textContent = g.gloss;
+          const score = document.createElement('span');
+          score.className = 'spot-score';
+          score.textContent = g.score;
+          it.appendChild(name);
+          it.appendChild(score);
+          // Click fills the box text and keeps the list open.
+          it.addEventListener('mousedown', ev => {
+            ev.preventDefault(); ev.stopPropagation();
+            sub.text = g.gloss;
+            sub.committed = true;
+            syncTwin(sub);
+            uploadSubtitles();
+            renderAll();
+          });
+          list.appendChild(it);
+        });
+        p.appendChild(list);
+      }
+      return p;
     }
 
     // Toggle side canvases visibility
@@ -1740,6 +1821,7 @@ function updateSubtitleBoxDimensions(sub) {
         rightHandle.className = 'resize-handle right';
         rightHandle.addEventListener('mousedown', e => initRightResize(e, sub.id));
         box.appendChild(rightHandle);
+        if (sub.spotState) box.appendChild(buildSpotPanel(sub));
         timelineTrack.appendChild(box);
       });
       updateSubtitleTrack();
