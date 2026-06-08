@@ -644,6 +644,32 @@
       }
     }
 
+    // Resolve a preview video URL for a spot gloss: prefer the bundled Signbank
+    // video; fall back to a studio clip from signcollect (form_data ->
+    // matched_transcriptions). Results (incl. in-flight promises) are memoized.
+    const GLOSS_VIDEO_ENDPOINT = 'https://signcollect.nl/zin/getGlossVideo.php';
+    const glossVideoCache = Object.create(null);
+
+    function glossSignbankVideo(gloss) {
+      const q = gloss.trim().toLowerCase();
+      const m = glosses.find(e => (e['Annotation ID Gloss: Dutch'] || '').toLowerCase() === q);
+      return m && m.Video ? m.Video : null;
+    }
+
+    function resolveGlossVideo(gloss) {
+      if (gloss in glossVideoCache) return Promise.resolve(glossVideoCache[gloss]);
+      const sb = glossSignbankVideo(gloss);
+      if (sb) { glossVideoCache[gloss] = sb; return Promise.resolve(sb); }
+      // No Signbank video → ask the signcollect studio-clip endpoint (fails quietly).
+      const p = fetch(GLOSS_VIDEO_ENDPOINT + '?gloss=' + encodeURIComponent(gloss))
+        .then(r => r.ok ? r.json() : null)
+        .then(j => (j && j.success && j.url) ? j.url : null)
+        .catch(() => null)
+        .then(url => { glossVideoCache[gloss] = url; return url; });
+      glossVideoCache[gloss] = p; // dedup concurrent hovers while in flight
+      return p;
+    }
+
     // Build the panel shown under a box for its current spot state.
     function buildSpotPanel(sub) {
       const p = document.createElement('div');
@@ -702,6 +728,15 @@
             uploadSubtitles();
             renderAll();
           });
+          // Hover previews the gloss video (Signbank, else signcollect studio clip),
+          // same container as the glossary hover. Guard against a late async result
+          // arriving after the pointer already left.
+          it.addEventListener('mouseenter', () => {
+            resolveGlossVideo(g.gloss).then(url => {
+              if (url && it.matches(':hover')) showVideoPreview(it, url);
+            });
+          });
+          it.addEventListener('mouseleave', hideVideoPreview);
           list.appendChild(it);
         });
         p.appendChild(list);
