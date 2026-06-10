@@ -425,7 +425,7 @@
       <button id="downloadVideoEafBtn" class="btn btn-info" title="Download the video (.mp4) and annotations (.eaf)">Download Video + EAF</button>
       <button id="saveSubtitlesBtn" class="btn btn-success">Autosave Enabled</button> <!-- Updated button text -->
       <button id="toggleAutoloopBtn" class="btn btn-warning">Disable Autoloop</button>
-      <button id="autoSegmentBtn" class="btn btn-secondary" style="display: none;">Auto Segmentation</button>
+      <button id="autoSegmentBtn" class="btn btn-secondary">Auto Segmentation</button>
       <button id="revertSegmentBtn" class="btn btn-outline-danger" style="display: none;">Revert to Original Segments</button>
       <button id="toggleSideCanvasBtn" class="btn btn-outline-secondary">Hide Side Videos</button>
       <span class="ml-2">Drag handle to move; edges to resize; click text to edit.</span>
@@ -549,6 +549,12 @@
       return t ? (t.visible !== false) : false;
     }
     function defaultTierId() { return tiers.length ? tiers[0].id : null; }
+    // Tier that auto-segmentation fills: the dedicated glossen tier (index 2)
+    // when a multi-tier ELAN structure is loaded, else the first/only tier
+    // (a fresh video-only drop has a single tier).
+    function segTargetTierId() {
+      return (tiers[2] && tiers[2].id) || (tiers[0] && tiers[0].id) || null;
+    }
     function tierRows() { return tiers.length; }          // number of timeline rows
     function tierRowTop(tierId) { return tierIndexById(tierId) * TIER_HEIGHT; }
     let autoLoopEnabled = true, loopSubtitle = null;
@@ -1054,8 +1060,8 @@
           document.querySelector('.speed-btn[data-speed="1"]').click();
           // Auto-segment a freshly dropped video — but only if it has no segments
           // yet (e.g. an EAF dropped alongside it would pre-populate tier-2).
-          const t2 = tiers[2] && tiers[2].id;
-          const hasSegments = t2 && subtitles.some(s => s.tierId === t2);
+          const segTier = segTargetTierId();
+          const hasSegments = segTier && subtitles.some(s => s.tierId === segTier);
           if (!hasSegments) runSegmentation();
         }
       });
@@ -3003,7 +3009,7 @@ ${tierXml}
 
     // Replace all tier 2 subtitles
     function replaceTier2Subtitles(segments) {
-      const tier2Id = tiers[2] && tiers[2].id;
+      const tier2Id = segTargetTierId();
       if (!tier2Id) return;
       // Backup original tier 2 subtitles before replacing
       originalTier2Subtitles = subtitles.filter(sub => sub.tierId === tier2Id).map(sub => ({...sub}));
@@ -3036,7 +3042,7 @@ ${tierXml}
       }
 
       // Remove current tier 2 subtitles
-      subtitles = subtitles.filter(sub => sub.tierId !== (tiers[2] && tiers[2].id));
+      subtitles = subtitles.filter(sub => sub.tierId !== segTargetTierId());
 
       // Restore original tier 2 subtitles
       originalTier2Subtitles.forEach(sub => {
@@ -3094,7 +3100,7 @@ ${tierXml}
           renderAll();
           uploadSubtitles();
           // Auto-spot every new tier-2 segment (same as manual-create auto-spot).
-          const tier2Id = tiers[2] && tiers[2].id;
+          const tier2Id = segTargetTierId();
           subtitles.filter(s => s.tierId === tier2Id).forEach(s => runSpot(s));
         }
       } catch (err) {
