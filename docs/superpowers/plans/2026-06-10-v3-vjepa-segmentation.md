@@ -12,6 +12,15 @@
 - **cloud** (= signcollect.nl): vjepa source `/home/gomer/vjepa-sign-segmentation`; tunnel units in `/etc/systemd/system/`; Apache confs in `/etc/apache2/conf-available/`. Spotter tunnel = `signrep-tunnel.service` (`ssh -L 127.0.0.1:8000:127.0.0.1:8000 gomer@monsterfish`).
 - **monsterfish001** (NVIDIA TITAN RTX, `python3.11`): spotter at `/mnt/fishbowl/gomer/signrep-spotter` (`.venv`, user unit `signrep-infer.service`, `:8000`). **vjepa not yet present** → target dir `/mnt/fishbowl/gomer/vjepa-sign-segmentation`.
 
+**Venv decision (verified live):** the segmenter **shares the spotter's venv** at
+`/mnt/fishbowl/gomer/signrep-spotter/.venv` rather than building its own. That venv
+already has `torch 2.12.0+cu126`, `numpy 2.4.6`, `cv2 4.13.0`, `albumentations 2.0.8`
+— every vjepa dep except `transformers`, which the spotter does **not** use. So
+provisioning only `pip install "transformers>=4.52"` (V-JEPA2 support) into it — purely
+additive, no separate venv, no ~2.5 GB torch redownload. `vjepa-segment.service` runs
+the shared venv's Python with `WorkingDirectory` = the vjepa dir (so `vjepa_seg` imports
+from cwd). Provisioning verifies the spotter is still healthy on `:8000` afterward.
+
 **rtk gotcha (MUST follow):** the rtk Claude Code hook rewrites tokens like `pip`/`curl`/`grep` inside Bash commands, which corrupts them inside `ssh '...'` payloads (remote gets `rtk: command not found`). Wrap every remote command in `rtk proxy ssh …` with an **inline single-quoted** script (`rtk proxy` does not forward stdin, so no `bash -s` heredocs). The vjepa repo, like signrep-spotter, is **not** git-tracked — save changes in place.
 
 ---
