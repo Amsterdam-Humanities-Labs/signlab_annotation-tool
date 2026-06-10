@@ -586,6 +586,10 @@
     const INFER_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:8000'
       : 'https://signcollect.nl/sign-spotter';
+    // Segmentation server (V-JEPA on monsterfish via the SSH tunnel + Apache proxy).
+    const SEG_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:8001'
+      : 'https://signcollect.nl/sign-segmenter';
     let inferVideoId = null;        // id returned by /upload for the current video
     let inferUploadPromise = null;  // in-flight upload (so we upload only once)
 
@@ -604,6 +608,16 @@
       if (r.status === 409) throw new Error('no_video');
       if (!r.ok) throw new Error('spot_failed');
       return (await r.json()).glosses || [];
+    }
+
+    // POST the (normalized 25fps) video blob to the segmenter; returns
+    // [{start,end,text:''}] ready for replaceTier2Subtitles().
+    async function segInfer(blob) {
+      const r = await fetch(SEG_BASE + '/segment', { method: 'POST', body: blob });
+      if (!r.ok) throw new Error('segment HTTP ' + r.status);
+      const data = await r.json();
+      const segs = Array.isArray(data.segments) ? data.segments : [];
+      return segs.map(([s, e]) => ({ start: s, end: e, text: '' }));
     }
 
     // Upload the current video once; resolve to its videoId (or null if no video).
