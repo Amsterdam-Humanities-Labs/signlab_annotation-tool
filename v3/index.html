@@ -582,7 +582,7 @@
 
     // ---- SignRep gloss spotting (v2) ----
     // Same-origin HTTPS path on signcollect.nl (Apache reverse-proxies to the
-    // warm inference server); localhost for dev. Mirrors the ISS_Server pattern.
+    // warm inference server); localhost for dev. Mirrors the sign-spotter proxy pattern.
     const INFER_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'http://localhost:8000'
       : 'https://signcollect.nl/sign-spotter';
@@ -3001,58 +3001,6 @@ ${tierXml}
       $('#segmentationErrorModal').modal('show');
     }
 
-    // Parse VTT/SRT to subtitle segments
-    function parseVTTToSegments(vttContent) {
-      const segments = [];
-      const lines = vttContent.split('\n');
-      let i = 0;
-
-      // Skip WEBVTT header
-      while (i < lines.length && !lines[i].includes('-->')) {
-        i++;
-      }
-
-      // Parse time ranges
-      while (i < lines.length) {
-        const line = lines[i].trim();
-
-        if (line.includes('-->')) {
-          // Replace commas with dots (SRT format uses commas, VTT uses dots)
-          const normalizedLine = line.replace(/,/g, '.');
-          const [startStr, endStr] = normalizedLine.split('-->').map(s => s.trim());
-          const start = parseVTTTimestamp(startStr);
-          const end = parseVTTTimestamp(endStr);
-
-          segments.push({start, end, text: ''}); // Empty text
-        }
-
-        i++;
-      }
-
-      console.log('[parseVTTToSegments] Parsed', segments.length, 'segments:', segments);
-      return segments;
-    }
-
-    // Convert VTT/SRT timestamp to seconds
-    function parseVTTTimestamp(timestamp) {
-      // Format: HH:MM:SS.mmm or MM:SS.mmm (dots, not commas)
-      const parts = timestamp.split(':');
-      let hours = 0, minutes = 0, seconds = 0;
-
-      if (parts.length === 3) {
-        hours = parseInt(parts[0], 10);
-        minutes = parseInt(parts[1], 10);
-        seconds = parseFloat(parts[2]);
-      } else if (parts.length === 2) {
-        minutes = parseInt(parts[0], 10);
-        seconds = parseFloat(parts[1]);
-      } else {
-        seconds = parseFloat(parts[0]);
-      }
-
-      return hours * 3600 + minutes * 60 + seconds;
-    }
-
     // Replace all tier 2 subtitles
     function replaceTier2Subtitles(segments) {
       const tier2Id = tiers[2] && tiers[2].id;
@@ -3167,35 +3115,6 @@ ${tierXml}
     document.getElementById('autoSegmentBtn').addEventListener('click', function() {
       runSegmentation();
     });
-
-    /**
-     * Update progress bar and message
-     */
-    function updateSegmentationProgress(percentage, stage, message) {
-      const $progressBar = $('#segmentationProgressBar');
-      const $progressPercent = $('#segmentationProgressPercent');
-      const $stage = $('#segmentationStage');
-      const $message = $('#segmentationProgressMessage');
-
-      // Update progress bar
-      $progressBar.css('width', percentage + '%');
-      $progressBar.attr('aria-valuenow', percentage);
-      $progressPercent.text(Math.round(percentage) + '%');
-
-      // Update text
-      $stage.text(stage);
-      $message.text(message);
-
-      // Change color based on progress
-      $progressBar.removeClass('bg-info bg-warning bg-success');
-      if (percentage < 33) {
-        $progressBar.addClass('bg-info');
-      } else if (percentage < 66) {
-        $progressBar.addClass('bg-warning');
-      } else {
-        $progressBar.addClass('bg-success');
-      }
-    }
 
     function rebuildTierControls() {
       const wrap = document.getElementById('tierControls');
