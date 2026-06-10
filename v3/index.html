@@ -1052,6 +1052,11 @@
           renderAll();
           //onclick on button id normal
           document.querySelector('.speed-btn[data-speed="1"]').click();
+          // Auto-segment a freshly dropped video — but only if it has no segments
+          // yet (e.g. an EAF dropped alongside it would pre-populate tier-2).
+          const t2 = tiers[2] && tiers[2].id;
+          const hasSegments = t2 && subtitles.some(s => s.tierId === t2);
+          if (!hasSegments) runSegmentation();
         }
       });
       URL.revokeObjectURL(videoUrl);
@@ -3158,187 +3163,10 @@ ${tierXml}
       }
     }
 
-    // Auto-Segmentation Button Event Handler
-    document.getElementById('autoSegmentBtn').addEventListener('click', async function() {
-      // Prevent concurrent requests
-      if (isSegmentationInProgress) {
-        showToast('Segmentation is already in progress. Please wait.', 'error', 3000);
-        return;
-      }
-
-      const params = new URLSearchParams(window.location.search);
-      const fileParam = params.get('filename') || '';
-
-      if (!fileParam) {
-        showSegmentationError('No filename found in URL parameters.');
-        return;
-      }
-
-      const baseFilename = fileParam.replace(/\.(wav|mp4)$/i, '');
-
-      // Construct HaMeR URL
-      const hamerUrl = `https://signcollect.nl/gebarenoverleg_media/studioFilesMini/raw/${baseFilename}.hamer`;
-
-      // Show modal and reset UI
-      $('#segmentationProgressModal').modal('show');
-      updateSegmentationProgress(0, 'Initializing', 'Connecting to ISS Server...');
-
-      isSegmentationInProgress = true;
-
-      try {
-        await processSegmentationViaISS(hamerUrl, baseFilename);
-      } catch (error) {
-        // Hide modal
-        await new Promise((resolve) => {
-          $('#segmentationProgressModal').one('hidden.bs.modal', resolve);
-          $('#segmentationProgressModal').modal('hide');
-        });
-        showSegmentationError('Error: ' + error.message);
-      } finally {
-        isSegmentationInProgress = false;
-      }
+    // Auto-Segmentation Button — re-run V-JEPA segmentation on the loaded video.
+    document.getElementById('autoSegmentBtn').addEventListener('click', function() {
+      runSegmentation();
     });
-
-    /**
-     * Process segmentation via ISS Server using direct WebSocket
-     */
-    function processSegmentationViaISS(hamerUrl, baseFilename) {
-      return new Promise((resolve, reject) => {
-        console.log('[ISS] Starting segmentation for:', baseFilename);
-        console.log('[ISS] HaMeR URL:', hamerUrl);
-
-        const requestId = 'js-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
-
-        // Determine WebSocket URL (try localhost first, fallback to production)
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const wsUrl = isLocalhost
-          ? 'ws://localhost:9102/ws'
-          : 'wss://signcollect.nl/ISS_Server/ws';
-
-        console.log('[ISS] WebSocket URL:', wsUrl);
-
-        let ws = null;
-
-        try {
-          // Create WebSocket connection
-          ws = new WebSocket(wsUrl);
-
-          // Connection opened
-          ws.onopen = () => {
-            console.log('[ISS] WebSocket connected');
-            updateSegmentationProgress(5, 'Connected', 'Connected to ISS Server');
-
-            // Send inference request
-            const request = {
-              type: 'inference_request',
-              request_id: requestId,
-              hamer_path: hamerUrl,
-              fps: 60
-            };
-
-            ws.send(JSON.stringify(request));
-            console.log('[ISS] Request sent:', request);
-            updateSegmentationProgress(10, 'Request Sent', 'Processing started...');
-          };
-
-          // Listen for messages
-          ws.onmessage = async (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              const msgType = data.type || '';
-
-              console.log('[ISS] Message received:', msgType, data);
-
-              switch (msgType) {
-                case 'ack':
-                  updateSegmentationProgress(15, 'Acknowledged', data.message || 'Request acknowledged');
-                  break;
-
-                case 'progress':
-                  const stage = formatStageName(data.stage || 'processing');
-                  const percentage = Math.min(95, Math.max(15, data.percentage || 50));
-                  const message = data.message || 'Processing...';
-                  updateSegmentationProgress(percentage, stage, message);
-                  break;
-
-                case 'result':
-                  ws.close();
-                  await handleCompletedSegmentation(data, resolve, reject);
-                  break;
-
-                case 'error':
-                  ws.close();
-                  reject(new Error(data.message || 'Segmentation failed'));
-                  break;
-              }
-            } catch (err) {
-              console.error('[ISS] Failed to parse message:', err);
-            }
-          };
-
-          // Connection error
-          ws.onerror = (error) => {
-            console.error('[ISS] WebSocket error:', error);
-            ws.close();
-            reject(new Error('WebSocket connection error. Make sure ISS Server is running.'));
-          };
-
-          // Connection closed
-          ws.onclose = (event) => {
-            console.log('[ISS] WebSocket closed:', event.code, event.reason);
-            if (!event.wasClean) {
-              reject(new Error('Connection closed unexpectedly'));
-            }
-          };
-
-        } catch (err) {
-          console.error('[ISS] Failed to create WebSocket:', err);
-          reject(err);
-        }
-      });
-    }
-
-    /**
-     * Handle completed segmentation
-     */
-    async function handleCompletedSegmentation(resultData, resolve, reject) {
-      updateSegmentationProgress(100, 'Complete', 'Segmentation successful!');
-
-      // Show completion briefly
-      await new Promise(r => setTimeout(r, 500));
-
-      // Hide modal
-      await new Promise((resolveHide) => {
-        $('#segmentationProgressModal').one('hidden.bs.modal', resolveHide);
-        $('#segmentationProgressModal').modal('hide');
-      });
-
-      // Check if we have VTT or SRT content
-      const content = resultData.vtt_content || resultData.srt_content;
-
-      if (!content) {
-        reject(new Error('No segmentation content received from server'));
-        return;
-      }
-
-      console.log('[ISS] Segments detected:', resultData.metadata?.segments_detected || 'unknown');
-
-      // Parse and apply segments
-      const segments = parseVTTToSegments(content);
-      console.log('[ISS] Parsed', segments.length, 'segments');
-
-      if (segments.length === 0) {
-        reject(new Error('No segments detected in the video.'));
-        return;
-      }
-
-      replaceTier2Subtitles(segments);
-      renderAll();
-      uploadSubtitles();
-
-      console.log(`[ISS] Auto-segmentation complete: ${segments.length} segments`);
-      resolve();
-    }
 
     /**
      * Update progress bar and message
@@ -3367,34 +3195,6 @@ ${tierXml}
       } else {
         $progressBar.addClass('bg-success');
       }
-    }
-
-    /**
-     * Format stage name for display
-     */
-    function formatStageName(stage) {
-      const stageNames = {
-        'starting': 'Initializing',
-        'connecting': 'Connecting',
-        'connected': 'Connected',
-        'request_sent': 'Sending Request',
-        'acknowledged': 'Acknowledged',
-        'downloading': 'Downloading Files',
-        'validation': 'Validating',
-        'loading_model': 'Loading Model',
-        'loading_data': 'Loading Data',
-        'preprocessing': 'Preprocessing',
-        'feature_extraction': 'Extracting Features',
-        'inference': 'Segmenting Signs',
-        'postprocessing': 'Post-processing',
-        'vtt_generation': 'Generating Subtitles',
-        'uploading': 'Uploading Results',
-        'finalizing': 'Finalizing',
-        'processing': 'Processing',
-        'completed': 'Complete',
-        'error': 'Error'
-      };
-      return stageNames[stage] || stage;
     }
 
     function rebuildTierControls() {
