@@ -3106,6 +3106,58 @@ ${tierXml}
     // Add progress tracking state
     let isSegmentationInProgress = false;
 
+    // V-JEPA auto-segmentation: POST the video, fill tier-2, then auto-spot each segment.
+    let segElapsedTimer = null;
+    async function runSegmentation() {
+      if (!SEG_BASE) return;
+      if (isSegmentationInProgress) {
+        showToast('Segmentation is already in progress. Please wait.', 'error', 3000);
+        return;
+      }
+      if (!videoBlob) { showToast('No video loaded to segment.', 'error', 3000); return; }
+      isSegmentationInProgress = true;
+
+      // Indeterminate progress: striped/animated bar at 100%, ticking elapsed seconds.
+      const $bar = $('#segmentationProgressBar');
+      $bar.removeClass('bg-info bg-warning bg-success').addClass('bg-info');
+      $bar.css('width', '100%').addClass('progress-bar-striped progress-bar-animated');
+      $('#segmentationProgressPercent').text('');
+      $('#segmentationStage').text('Segmenting…');
+      const t0 = Date.now();
+      $('#segmentationProgressMessage').text('Running V-JEPA segmentation…');
+      clearInterval(segElapsedTimer);
+      segElapsedTimer = setInterval(() => {
+        const s = Math.round((Date.now() - t0) / 1000);
+        $('#segmentationProgressMessage').text('Running V-JEPA segmentation… ' + s + 's');
+      }, 1000);
+      $('#segmentationProgressModal').modal('show');
+
+      try {
+        const segments = await segInfer(videoBlob);
+        if (!segments.length) {
+          showToast('No segments detected in the video.', 'error', 4000);
+        } else {
+          replaceTier2Subtitles(segments);
+          renderAll();
+          uploadSubtitles();
+          // Auto-spot every new tier-2 segment (same as manual-create auto-spot).
+          const tier2Id = tiers[2] && tiers[2].id;
+          subtitles.filter(s => s.tierId === tier2Id).forEach(s => runSpot(s));
+        }
+      } catch (err) {
+        console.error('[seg] segmentation failed', err);
+        showToast('Auto-segmentation failed: ' + (err && err.message ? err.message : err), 'error', 6000);
+      } finally {
+        clearInterval(segElapsedTimer); segElapsedTimer = null;
+        await new Promise((resolve) => {
+          $('#segmentationProgressModal').one('hidden.bs.modal', resolve);
+          $('#segmentationProgressModal').modal('hide');
+        });
+        $bar.removeClass('progress-bar-striped progress-bar-animated');
+        isSegmentationInProgress = false;
+      }
+    }
+
     // Auto-Segmentation Button Event Handler
     document.getElementById('autoSegmentBtn').addEventListener('click', async function() {
       // Prevent concurrent requests
