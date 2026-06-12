@@ -537,6 +537,7 @@
     let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
     let videoBlob = null;     // the loaded video File/Blob, copied into the work folder so sessions can be restored
     let segSourceBlob = null; // the ORIGINAL dropped file (pre 25fps/1080p normalization) — the 50fps segmenter profile needs the source frame rate; null on session restore
+    let segVideoId = null;    // server-side videoId from /upload (server-convert path); null on wasm fallback or session restore
     let videoSavedToDir = false; // whether videoBlob has already been written to the work folder this session
     let videoLoaded = false;  // true once a video's frames are loaded (controls whether the drag overlay auto-hides)
 
@@ -617,9 +618,58 @@
       return (await r.json()).glosses || [];
     }
 
-    // POST a video blob to the segmenter; returns [{start,end,text:''}] ready
-    // for replaceTier2Subtitles().
+    // Upload the ORIGINAL file to the segmenter's /upload (native ffmpeg there
+    // converts far faster than wasm), then download the 25fps/1080p browser
+    // copy. Returns {videoId, file}. Throws on any failure (caller falls back
+    // to the in-browser wasm converter).
+    async function serverConvert(file) {
+      showConvertModal('Uploading original…', 0);
+      const videoId = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', SEG_BASE + '/upload');
+        xhr.responseType = 'json';
+        xhr.timeout = 290000; // just under Apache ProxyTimeout (300 s)
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setConvertProgress(pct < 100 ? 'Uploading original… ' + pct + '%'
+                                       : 'Converting on server…', pct);
+        };
+        xhr.onload = () => (xhr.status === 200 && xhr.response && xhr.response.videoId)
+          ? resolve(xhr.response.videoId)
+          : reject(new Error('upload HTTP ' + xhr.status));
+        xhr.onerror = () => reject(new Error('upload network error'));
+        xhr.ontimeout = () => reject(new Error('upload timeout'));
+        xhr.send(file);
+      });
+      setConvertProgress('Downloading converted video…', 100);
+      const r = await fetch(SEG_BASE + '/video/' + videoId);
+      if (!r.ok) throw new Error('video download HTTP ' + r.status);
+      const buf = await r.arrayBuffer();
+      hideConvertModal();
+      const base = (file.name.replace(/\.[^.]+$/, '') || 'video');
+      return { videoId, file: new File([buf], base + '.mp4', { type: 'video/mp4' }) };
+    }
+
+    // POST to the segmenter: by videoId when the server already has the
+    // original (server-convert path) — falling back to re-uploading bytes when
+    // the id expired (24h TTL) — else raw video bytes. Returns
+    // [{start,end,text:''}] ready for replaceTier2Subtitles().
     async function segInfer(blob) {
+      if (segVideoId) {
+        const r = await fetch(SEG_BASE + '/segment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId: segVideoId })
+        });
+        if (r.ok) {
+          const data = await r.json();
+          const segs = Array.isArray(data.segments) ? data.segments : [];
+          return segs.map(([s, e]) => ({ start: s, end: e, text: '' }));
+        }
+        if (r.status !== 404) throw new Error('segment HTTP ' + r.status);
+        segVideoId = null;   // expired on the server — re-upload below
+      }
       const r = await fetch(SEG_BASE + '/segment', { method: 'POST', body: blob });
       if (!r.ok) throw new Error('segment HTTP ' + r.status);
       const data = await r.json();
@@ -823,6 +873,7 @@
 
     // ---- Video normalization (25fps / 1080p) + memory protection ----
     const TARGET_FPS = 25;
+    const SEG_MAX_UPLOAD = 190 * 1024 * 1024; // stay under Apache LimitRequestBody (200 MB)
     const TARGET_W = 1920, TARGET_H = 1080;
     const MAX_DECODE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB decode-memory ceiling (frames are kept as ImageBitmaps)
     let ffmpegInstance = null;
@@ -935,6 +986,7 @@
     // Orchestrates: probe -> memory guard -> convert if needed -> hand to the frame-decode pipeline.
     async function prepareAndLoadVideo(file) {
       segSourceBlob = file;
+      segVideoId = null;
       const srcUrl = URL.createObjectURL(file);
       let info = null;
       try { info = await probeVideo(srcUrl); } catch (e) { console.warn('Video probe failed:', e); }
@@ -972,7 +1024,18 @@
           return true;
         }
         try {
-          finalFile = await convertVideoWithProgress(file);
+          let converted = null;
+          if (SEG_BASE && file.size <= SEG_MAX_UPLOAD) {
+            try {
+              converted = await serverConvert(file);   // fast native path
+              segVideoId = converted.videoId;
+            } catch (err) {
+              console.warn('[convert] server convert failed, using wasm:', err);
+              hideConvertModal();
+            }
+          }
+          finalFile = converted ? converted.file
+                                : await convertVideoWithProgress(file);
           cachePutConverted(fp, finalFile); // cache for next time (fire-and-forget)
         } catch (e) {
           hideConvertModal();
@@ -3097,8 +3160,8 @@ ${tierXml}
         // Prefer the original file: the ensemble50 profile samples at 50 fps, so
         // the 25fps-normalized copy would halve temporal resolution. Fall back to
         // the normalized blob on session restore or when the original would blow
-        // the proxy's 200 MB body cap.
-        const SEG_MAX_UPLOAD = 190 * 1024 * 1024;
+        // the proxy's 200 MB body cap. (Only reached when segVideoId is null —
+        // the server-convert path segments by videoId without re-uploading.)
         const segUpload = (segSourceBlob && segSourceBlob.size <= SEG_MAX_UPLOAD)
           ? segSourceBlob : videoBlob;
         const segments = await segInfer(segUpload);
