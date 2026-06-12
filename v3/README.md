@@ -1,10 +1,12 @@
-# Annotation Tool — Standalone Sign-Language Annotation Editor
+# Annotation Tool v3 — Sign-Language Annotation Editor
 
-A self-contained, browser-only editor for annotating sign-language videos on a
-multi-tier timeline and saving the result as an ELAN **EAF** file. No server, no
-database, no login — you drop in a video (and optionally an EAF) and work locally.
+A browser-based editor for annotating sign-language videos on a multi-tier
+timeline and saving the result as an ELAN **EAF** file. No database, no login —
+annotations live in local files. Dropping a video also triggers the AI
+pipeline: automatic sign segmentation (V-JEPA 2) and per-segment gloss spotting
+(SignRep), both served by warm GPU inference servers (see *Video pipeline*).
 
-**Live URL:** https://signcollect.nl/annotation-tool/
+**Live URL:** https://signcollect.nl/annotation-tool/ (redirects to `v3/`)
 
 ## Requirements
 
@@ -18,8 +20,12 @@ database, no login — you drop in a video (and optionally an EAF) and work loca
 1. **Open** https://signcollect.nl/annotation-tool/
 2. **Drop a video** (`.mp4`) onto the page — or click the file picker. You can drop an
    **`.eaf`** file at the same time (or on its own) to load existing annotations.
-   - The video is read locally in your browser; it is **not** uploaded anywhere.
-   - Frames are decoded for precise frame-by-frame scrubbing (long videos take longer to load).
+   - Frames are decoded locally for precise frame-by-frame scrubbing (long videos take
+     longer to load). For format conversion and the AI features the video **is**
+     uploaded to the `signcollect.nl` inference servers — uploads are capped at
+     3 minutes / 200 MB and auto-deleted (24 h at the latest). See *Video pipeline*.
+   - If the video has no annotations yet, **auto-segmentation** runs on load and fills
+     the timeline with detected sign segments; each segment is then auto-spotted.
 3. **Tiers (timelines).**
    - Start with one tier (`Tier 1`). Use **+ Tier** to add more.
    - **Double-click** a tier's name chip to rename it; click **×** to delete it
@@ -50,13 +56,42 @@ keeps working:
 - **Signbank video preview** — previews gloss videos from Signbank/Signcollect.
 - **Gloss glossary search** — works fully offline (the gloss data is bundled in
   `glosses_transformed.json`).
+- **Auto-segmentation** (V-JEPA 2) — on a fresh video drop, the segmenter fills the
+  timeline with detected sign segments. Reaches `https://signcollect.nl/sign-segmenter/`.
 - **Gloss spotting** (SignRep) — when a segment is created, the tool uploads the
-  video once and asks the inference server for the **top-10 NGT glosses** for that
-  segment, shown in a dropdown under the box (click to fill the annotation; ↻ to
-  re-run). Reaches `https://signcollect.nl/sign-spotter/` (Apache reverse-proxies
-  to a warm Python server; `infer_server.py` in the `signrep-spotter` repo). Fails
-  quietly when offline. Re-decoding a long video per segment is slow on CPU — best
-  for short clips; a GPU box or per-video frame cache is the throughput lever.
+  (25 fps) video once and asks the inference server for the **top-10 NGT glosses**
+  per segment, shown in a dropdown under the box (click to fill the annotation; ↻ to
+  re-run). Reaches `https://signcollect.nl/sign-spotter/`. Fails quietly when offline.
+
+## Video pipeline (conversion + AI inference)
+
+Since 2026-06-12 video conversion happens **server-side** (native ffmpeg on the GPU
+box) instead of in-browser ffmpeg.wasm — one upload, two derivatives:
+
+```
+drop video ── needs converting? (fps ≠ 25 or > 1080p)
+   │ no                                  │ yes
+   │                                     ├─ POST original ──> /sign-segmenter/upload   (→ {videoId})
+   │                                     │     ├─ ffmpeg -r 25 (fit 1080p) ──> GET /video/{videoId}
+   │                                     │     └─ ffmpeg -r 50 (lazy, cached)──┐
+   ▼                                     ▼                                     │
+25 fps browser copy ── frame decode (timeline) + /sign-spotter (gloss spotting)│
+                                                                               ▼
+auto-segmentation ── POST {videoId} ──> /sign-segmenter/segment ── V-JEPA ensemble50 @ 50 fps
+```
+
+- **Segmenter** (`vjepa-sign-segmentation`): V-JEPA 2 ViT-L backbone + the
+  `ensemble50` profile (BiLSTM-50 × MS-TCN-50 probability ensemble, tuned decode,
+  50 fps — boundary F1 0.871 on Zin-in-NGT). Segments the stored *original*, so
+  high-fps sources keep their temporal resolution.
+- **Spotter** (`signrep-spotter`): SignRep embeddings, 25 fps-tuned; receives the
+  25 fps browser copy, unchanged by the server-convert pipeline.
+- **Fallbacks**: in-browser ffmpeg.wasm conversion remains for offline use, originals
+  over 190 MB, or an expired videoId (the store has a 24 h TTL; the tool transparently
+  re-uploads bytes on a 404).
+- **Infrastructure**: both servers run warm on the GPU box (monsterfish), reached via
+  Apache reverse-proxies (`/sign-segmenter/`, `/sign-spotter/`) over SSH tunnels.
+  Upload caps: 200 MB (Apache `LimitRequestBody`) and 180 s video duration.
 
 ## Files in this directory (deployment)
 
