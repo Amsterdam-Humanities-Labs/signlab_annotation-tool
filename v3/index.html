@@ -536,6 +536,7 @@
     let videoDuration = 5, subtitles = [], uniqueId = 0;
     let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
     let videoBlob = null;     // the loaded video File/Blob, copied into the work folder so sessions can be restored
+    let segSourceBlob = null; // the ORIGINAL dropped file (pre 25fps/1080p normalization) — the 50fps segmenter profile needs the source frame rate; null on session restore
     let videoSavedToDir = false; // whether videoBlob has already been written to the work folder this session
     let videoLoaded = false;  // true once a video's frames are loaded (controls whether the drag overlay auto-hides)
 
@@ -616,8 +617,8 @@
       return (await r.json()).glosses || [];
     }
 
-    // POST the (normalized 25fps) video blob to the segmenter; returns
-    // [{start,end,text:''}] ready for replaceTier2Subtitles().
+    // POST a video blob to the segmenter; returns [{start,end,text:''}] ready
+    // for replaceTier2Subtitles().
     async function segInfer(blob) {
       const r = await fetch(SEG_BASE + '/segment', { method: 'POST', body: blob });
       if (!r.ok) throw new Error('segment HTTP ' + r.status);
@@ -933,6 +934,7 @@
 
     // Orchestrates: probe -> memory guard -> convert if needed -> hand to the frame-decode pipeline.
     async function prepareAndLoadVideo(file) {
+      segSourceBlob = file;
       const srcUrl = URL.createObjectURL(file);
       let info = null;
       try { info = await probeVideo(srcUrl); } catch (e) { console.warn('Video probe failed:', e); }
@@ -3092,7 +3094,14 @@ ${tierXml}
       $('#segmentationProgressModal').modal('show');
 
       try {
-        const segments = await segInfer(videoBlob);
+        // Prefer the original file: the ensemble50 profile samples at 50 fps, so
+        // the 25fps-normalized copy would halve temporal resolution. Fall back to
+        // the normalized blob on session restore or when the original would blow
+        // the proxy's 200 MB body cap.
+        const SEG_MAX_UPLOAD = 190 * 1024 * 1024;
+        const segUpload = (segSourceBlob && segSourceBlob.size <= SEG_MAX_UPLOAD)
+          ? segSourceBlob : videoBlob;
+        const segments = await segInfer(segUpload);
         if (!segments.length) {
           showToast('No segments detected in the video.', 'error', 4000);
         } else {
