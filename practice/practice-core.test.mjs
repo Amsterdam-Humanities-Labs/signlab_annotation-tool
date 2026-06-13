@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  normalizeGloss, buildTargetPool, isTopKMatch,
+  normalizeGloss, buildTargetPool, isTopKMatch, targetScore, isMatch,
   pickSignSegment, pickNextTarget, applyResult, MAX_ATTEMPTS,
 } from './practice-core.js';
 
@@ -26,6 +26,25 @@ test('isTopKMatch matches within k, case-insensitively', () => {
   assert.equal(isTopKMatch('HUIS', spotted, 3), true);
   assert.equal(isTopKMatch('FIETS', spotted, 3), false);       // rank 4, outside top-3
   assert.equal(isTopKMatch('HUIS', ['BOOM', 'HUIS'], 3), true); // accepts string[] too
+});
+
+test('targetScore returns the target gloss score or null', () => {
+  const spotted = [{ gloss: 'BOOM', score: 0.9 }, { gloss: 'HUIS', score: 0.82 }];
+  assert.equal(targetScore('huis', spotted), 0.82);   // case-insensitive
+  assert.equal(targetScore('FIETS', spotted), null);  // absent
+  assert.equal(targetScore('boom', [{ gloss: 'BOOM' }]), null); // present but no numeric score
+});
+
+test('isMatch passes on top-k OR target score > threshold', () => {
+  const spotted = [
+    { gloss: 'A', score: 0.95 }, { gloss: 'B', score: 0.9 }, { gloss: 'C', score: 0.85 },
+    { gloss: 'HUIS', score: 0.78 }, { gloss: 'X', score: 0.5 },
+  ];
+  assert.equal(isMatch('HUIS', spotted, 3, 0.7), true);  // rank 4 but score 0.78 > 0.7
+  assert.equal(isMatch('A', spotted, 3, 0.7), true);     // top-3 path, regardless of score
+  assert.equal(isMatch('X', spotted, 3, 0.7), false);    // outside top-3 and 0.5 <= 0.7
+  assert.equal(isMatch('ZZZ', spotted, 3, 0.7), false);  // absent entirely
+  assert.equal(isMatch('HUIS', spotted, 3, 0.8), false); // 0.78 does not clear a 0.8 bar
 });
 
 test('pickSignSegment picks the longest segment', () => {
