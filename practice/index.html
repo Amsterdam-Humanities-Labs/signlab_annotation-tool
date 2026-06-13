@@ -197,6 +197,57 @@
       });
     }
 
+    // Pipeline: webm → serverConvert → segment → pick sign → spot.
+    async function analyze(blob) {
+      const { videoId, file } = await serverConvert(blob);
+      const segments = await segInfer(videoId).catch(() => []);   // tolerate seg failure
+      const clipDur = RECORD_MS / 1000;
+      const seg = pickSignSegment(segments, clipDur, 2);
+      const spotVideoId = await inferUpload(file);
+      const spotted = await inferSpot(spotVideoId, seg.start, seg.end);
+      return { spotted, segments, clipDur, seg };
+    }
+
+    function showResult(spotted, segments, clipDur) {
+      // Timeline: draw detected segments.
+      segLayer.innerHTML = '';
+      for (const s of segments) {
+        const bar = document.createElement('div');
+        bar.className = 'seg';
+        bar.style.left = (100 * s.start / clipDur) + '%';
+        bar.style.width = (100 * (s.end - s.start) / clipDur) + '%';
+        segLayer.appendChild(bar);
+      }
+      // Spotted list, target highlighted if top-3.
+      const matched = isTopKMatch(current.gloss, spotted, 3);
+      spotList.innerHTML = '';
+      spotted.slice(0, 10).forEach((g, i) => {
+        const li = document.createElement('li');
+        const name = g && g.gloss != null ? g.gloss : g;
+        li.textContent = (i + 1) + '. ' + name + (g.score != null ? '  ' + Number(g.score).toFixed(2) : '');
+        if (normalizeGloss(name) === normalizeGloss(current.gloss)) li.classList.add('hit');
+        spotList.appendChild(li);
+      });
+      decide(matched);
+    }
+
+    async function decide(matched) {
+      const res = applyResult({ attempts }, matched); attempts = res.attempts;
+      if (res.outcome === 'match') {
+        score.matched++; score.streak++; renderScore();
+        setOverlay('✅ Matched <b>' + current.gloss + '</b>!');
+        await sleep(1400); nextRound();
+      } else if (res.outcome === 'retry') {
+        setOverlay('❌ Not in top-3 (attempt ' + attempts + '/' + MAX_ATTEMPTS + ') — Retry');
+        retryBtn.hidden = false;
+      } else { // reveal
+        score.revealed++; score.streak = 0; renderScore();
+        setOverlay('Here it is — watch closely');
+        refVideo.playbackRate = 0.5; refVideo.currentTime = 0; refVideo.play().catch(() => {});
+        await sleep(3000); refVideo.playbackRate = 1; nextRound();
+      }
+    }
+
     boot();
   </script>
 </body>
