@@ -367,11 +367,13 @@
         // Each handler hides its own button synchronously so a double-click
         // cannot launch two pipelines (the async runAttempt would otherwise
         // double-count attempts).
-        startBtn.onclick = () => { startBtn.hidden = true; running = true; runAttempt(); };
+        startBtn.onclick = () => { startBtn.hidden = true; runAttempt(); };
         retryBtn.onclick = () => { retryBtn.hidden = true; runAttempt(); };
         skipBtn.onclick  = () => { score.streak = 0; renderScore(); nextRound(); };
         stopBtn.onclick  = () => {
-          running = false;                 // gates the in-flight runAttempt (see below)
+          running = false;                 // gates the in-flight runAttempt at its next live() check
+          roundId++;                       // supersede it permanently (also aborts post-sleep advance in decide)
+          if (activeRec && activeRec.state !== 'inactive') activeRec.stop();   // tear down a recording in progress
           retryBtn.hidden = true; startBtn.hidden = false;
           setOverlay('Stopped. Press <b>Start</b> to try again, or <b>Skip</b> for a new sign.'); setState('stopped');
         };
@@ -412,7 +414,8 @@
     let attempts = 0;
     let score = { matched: 0, revealed: 0, streak: 0 };
     let running = false;
-    let roundId = 0;             // bumped by nextRound(); async work checks it to abort superseded rounds
+    let roundId = 0;             // bumped by nextRound()/Stop; async work checks it to abort superseded rounds
+    let activeRec = null, activeIv = null, activeTo = null;   // in-flight recorder + its timers, so Stop can tear them down
 
     function pickMime() {
       for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'])
@@ -440,6 +443,7 @@
     }
 
     async function runAttempt() {
+      running = true;                                           // an attempt is now active; Stop clears this
       const myRound = roundId;                                  // abort if Skip/new round supersedes us
       const live = () => running && roundId === myRound;
       startBtn.hidden = true; retryBtn.hidden = true;
@@ -462,12 +466,14 @@
     function recordClip() {
       return new Promise((resolve, reject) => {
         const rec = new MediaRecorder(camStream, MIME ? { mimeType: MIME } : undefined);
+        activeRec = rec;
         const chunks = [];
+        const cleanup = () => { clearInterval(activeIv); clearTimeout(activeTo); if (activeRec === rec) activeRec = null; };
         rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-        rec.onstop = () => resolve(new Blob(chunks, { type: MIME || 'video/webm' }));
-        rec.onerror = (e) => reject(e.error || new Error('record_error'));
+        rec.onstop = () => { cleanup(); resolve(new Blob(chunks, { type: MIME || 'video/webm' })); };
+        rec.onerror = (e) => { cleanup(); reject(e.error || new Error('record_error')); };
         let n = 4; setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>'); setState('recording');
-        const iv = setInterval(() => { n--; if (n >= 0) setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>'); }, 1000);
+        activeIv = setInterval(() => { n--; if (n >= 0) setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>'); }, 1000);
         cursor.style.transition = 'none'; cursor.style.left = '0%';
         // Double rAF: ensure the reset (left:0, no transition) is flushed before
         // re-enabling the transition, so the sweep animates instead of jumping.
@@ -475,7 +481,7 @@
           cursor.style.transition = `left ${RECORD_MS}ms linear`; cursor.style.left = '100%';
         }));
         rec.start();
-        setTimeout(() => { clearInterval(iv); rec.stop(); }, RECORD_MS);
+        activeTo = setTimeout(() => rec.stop(), RECORD_MS);     // onstop runs cleanup
       });
     }
 
