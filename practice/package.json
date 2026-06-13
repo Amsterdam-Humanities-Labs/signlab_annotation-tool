@@ -1,0 +1,9 @@
+{
+  "name": "signrep-practice",
+  "private": true,
+  "type": "module",
+  "description": "Pure-logic module + node:test tests for the SignRep practice app (the app itself is static; this only marks the JS as ESM for node).",
+  "scripts": {
+    "test": "node --test"
+  }
+}
