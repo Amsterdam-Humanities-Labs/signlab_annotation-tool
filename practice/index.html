@@ -103,7 +103,12 @@
         TARGET_POOL = buildTargetPool(vocabRes.glosses || [], entries);
         if (!TARGET_POOL.length) { fatal('No practiceable signs (vocab ∩ Signbank video is empty).'); return; }
         await initCamera();
-        // Task 4 wires the state machine start here.
+        renderScore();
+        startBtn.onclick = () => { running = true; runAttempt(); };
+        retryBtn.onclick = () => runAttempt();
+        skipBtn.onclick  = () => { score.streak = 0; renderScore(); nextRound(); };
+        stopBtn.onclick  = () => { running = false; setOverlay('Stopped. Press Skip for a new sign.'); };
+        nextRound();
       } catch (e) {
         fatal('Cannot start practice: ' + e.message + '. The spotter /vocab endpoint must be reachable.');
       }
@@ -119,6 +124,77 @@
         audio: false,
       });
       document.getElementById('camPreview').srcObject = camStream;
+    }
+
+    // ---- DOM refs ----
+    const refVideo = document.getElementById('refVideo');
+    const refGloss = document.getElementById('refGloss');
+    const overlay  = document.getElementById('overlay');
+    const cursor   = document.getElementById('cursor');
+    const segLayer = document.getElementById('segLayer');
+    const spotList = document.getElementById('spotList');
+    const scoreboard = document.getElementById('scoreboard');
+    const startBtn = document.getElementById('startBtn');
+    const skipBtn  = document.getElementById('skipBtn');
+    const retryBtn = document.getElementById('retryBtn');
+    const stopBtn  = document.getElementById('stopBtn');
+
+    const RECORD_MS = 4000, MIME = pickMime();
+    let current = null;          // {gloss, video}
+    let attempts = 0;
+    let score = { matched: 0, revealed: 0, streak: 0 };
+    let running = false;
+
+    function pickMime() {
+      for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'])
+        if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+      return '';
+    }
+    const sleep = (ms) => new Promise(res => { let t0; const tick = (t) => { if (t0 == null) t0 = t; (t - t0 >= ms) ? res() : requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
+
+    function setOverlay(html) { overlay.innerHTML = html; }
+    function renderScore() { scoreboard.textContent = `Streak ${score.streak} · ${score.matched}/${score.matched + score.revealed}`; }
+
+    // WATCH: show the reference clip, wait for Start.
+    async function nextRound() {
+      attempts = 0;
+      current = pickNextTarget(TARGET_POOL, recent, Math.random);
+      recent = [current.gloss, ...recent].slice(0, 10);
+      refGloss.textContent = current.gloss;
+      refVideo.src = current.video; refVideo.play().catch(() => {});
+      segLayer.innerHTML = ''; spotList.innerHTML = '';
+      setOverlay('Watch, then press <b>Start</b>');
+      retryBtn.hidden = true; startBtn.hidden = false;
+    }
+
+    async function runAttempt() {
+      startBtn.hidden = true; retryBtn.hidden = true;
+      setOverlay('Ready?…'); await sleep(900);                 // READY
+      const blob = await recordClip();                          // RECORD (4s)
+      setOverlay('Analyzing…');                                 // ANALYZE
+      try {
+        const { spotted, segments, clipDur } = await analyze(blob);
+        showResult(spotted, segments, clipDur);                 // RESULT
+      } catch (e) {
+        setOverlay('Analysis failed — Retry'); retryBtn.hidden = false;
+      }
+    }
+
+    // RECORD exactly RECORD_MS, animating the cursor across the strip.
+    function recordClip() {
+      return new Promise((resolve, reject) => {
+        const rec = new MediaRecorder(camStream, MIME ? { mimeType: MIME } : undefined);
+        const chunks = [];
+        rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+        rec.onstop = () => resolve(new Blob(chunks, { type: MIME || 'video/webm' }));
+        rec.onerror = (e) => reject(e.error || new Error('record_error'));
+        let n = 4; setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>');
+        const iv = setInterval(() => { n--; if (n >= 0) setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>'); }, 1000);
+        cursor.style.transition = 'none'; cursor.style.left = '0%';
+        requestAnimationFrame(() => { cursor.style.transition = `left ${RECORD_MS}ms linear`; cursor.style.left = '100%'; });
+        rec.start();
+        setTimeout(() => { clearInterval(iv); rec.stop(); }, RECORD_MS);
+      });
     }
 
     boot();
