@@ -36,6 +36,27 @@ export function isTopKMatch(targetGloss, spotted, k = 3) {
   return spotted.slice(0, k).some(s => normalizeGloss(s && s.gloss != null ? s.gloss : s) === t);
 }
 
+// The target gloss's own spotted score (cosine), or null if the target isn't in
+// the results or carries no numeric score.
+export function targetScore(targetGloss, spotted) {
+  const t = normalizeGloss(targetGloss);
+  for (const s of spotted) {
+    if (normalizeGloss(s && s.gloss != null ? s.gloss : s) === t) {
+      return s && typeof s.score === 'number' ? s.score : null;
+    }
+  }
+  return null;
+}
+
+// A target counts as matched if it lands in the top-k OR the spotter scored the
+// target itself above the threshold — a confident hit just outside the top-k
+// still passes. (Threshold compares the TARGET's score, not the top-1 gloss's.)
+export function isMatch(targetGloss, spotted, k = 3, scoreThreshold = 0.7) {
+  if (isTopKMatch(targetGloss, spotted, k)) return true;
+  const sc = targetScore(targetGloss, spotted);
+  return sc != null && sc > scoreThreshold;
+}
+
 // The sign = the longest detected segment; fall back to a centered window of
 // width `fallbackWidth` (clamped to the clip) when nothing is detected.
 export function pickSignSegment(segments, clipDuration, fallbackWidth = 2) {
