@@ -25,7 +25,7 @@
       <button id="startBtn" type="button">Start</button>
       <button id="skipBtn" type="button">Skip</button>
       <button id="retryBtn" type="button" hidden>Retry</button>
-      <button id="stopBtn" type="button">Stop</button>
+      <button id="stopBtn" type="button" hidden>Stop</button>
     </section>
     <div id="errorBar" hidden></div>
   </main>
@@ -104,10 +104,18 @@
         if (!TARGET_POOL.length) { fatal('No practiceable signs (vocab ∩ Signbank video is empty).'); return; }
         await initCamera();
         renderScore();
-        startBtn.onclick = () => { running = true; runAttempt(); };
-        retryBtn.onclick = () => runAttempt();
+        // Each handler hides its own button synchronously so a double-click
+        // cannot launch two pipelines (the async runAttempt would otherwise
+        // double-count attempts).
+        startBtn.onclick = () => { startBtn.hidden = true; running = true; runAttempt(); };
+        retryBtn.onclick = () => { retryBtn.hidden = true; runAttempt(); };
         skipBtn.onclick  = () => { score.streak = 0; renderScore(); nextRound(); };
-        stopBtn.onclick  = () => { running = false; setOverlay('Stopped. Press Skip for a new sign.'); };
+        stopBtn.onclick  = () => {
+          running = false;                 // gates the in-flight runAttempt (see below)
+          retryBtn.hidden = true; startBtn.hidden = false;
+          setOverlay('Stopped. Press <b>Start</b> to try again, or <b>Skip</b> for a new sign.');
+        };
+        stopBtn.hidden = false;
         nextRound();
       } catch (e) {
         fatal('Cannot start practice: ' + e.message + '. The spotter /vocab endpoint must be reachable.');
@@ -144,6 +152,7 @@
     let attempts = 0;
     let score = { matched: 0, revealed: 0, streak: 0 };
     let running = false;
+    let roundId = 0;             // bumped by nextRound(); async work checks it to abort superseded rounds
 
     function pickMime() {
       for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'])
@@ -157,25 +166,33 @@
 
     // WATCH: show the reference clip, wait for Start.
     async function nextRound() {
+      roundId++;                 // invalidate any in-flight attempt/decide for the previous sign
       attempts = 0;
       current = pickNextTarget(TARGET_POOL, recent, Math.random);
+      if (!current) { fatal('No practiceable signs left.'); return; }
       recent = [current.gloss, ...recent].slice(0, 10);
       refGloss.textContent = current.gloss;
-      refVideo.src = current.video; refVideo.play().catch(() => {});
+      refVideo.pause(); refVideo.src = current.video; refVideo.play().catch(() => {});
       segLayer.innerHTML = ''; spotList.innerHTML = '';
       setOverlay('Watch, then press <b>Start</b>');
       retryBtn.hidden = true; startBtn.hidden = false;
     }
 
     async function runAttempt() {
+      const myRound = roundId;                                  // abort if Skip/new round supersedes us
+      const live = () => running && roundId === myRound;
       startBtn.hidden = true; retryBtn.hidden = true;
       setOverlay('Ready?…'); await sleep(900);                 // READY
+      if (!live()) return;
       const blob = await recordClip();                          // RECORD (4s)
+      if (!live()) return;
       setOverlay('Analyzing…');                                 // ANALYZE
       try {
         const { spotted, segments, clipDur } = await analyze(blob);
-        showResult(spotted, segments, clipDur);                 // RESULT
+        if (!live()) return;
+        await showResult(spotted, segments, clipDur, myRound);  // RESULT
       } catch (e) {
+        if (roundId !== myRound) return;
         setOverlay('Analysis failed — Retry'); retryBtn.hidden = false;
       }
     }
@@ -191,7 +208,11 @@
         let n = 4; setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>');
         const iv = setInterval(() => { n--; if (n >= 0) setOverlay('<b>Sign!</b> <span class="count">' + n + '</span>'); }, 1000);
         cursor.style.transition = 'none'; cursor.style.left = '0%';
-        requestAnimationFrame(() => { cursor.style.transition = `left ${RECORD_MS}ms linear`; cursor.style.left = '100%'; });
+        // Double rAF: ensure the reset (left:0, no transition) is flushed before
+        // re-enabling the transition, so the sweep animates instead of jumping.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          cursor.style.transition = `left ${RECORD_MS}ms linear`; cursor.style.left = '100%';
+        }));
         rec.start();
         setTimeout(() => { clearInterval(iv); rec.stop(); }, RECORD_MS);
       });
@@ -208,7 +229,7 @@
       return { spotted, segments, clipDur, seg };
     }
 
-    function showResult(spotted, segments, clipDur) {
+    async function showResult(spotted, segments, clipDur, myRound) {
       // Timeline: draw detected segments.
       segLayer.innerHTML = '';
       for (const s of segments) {
@@ -228,15 +249,17 @@
         if (normalizeGloss(name) === normalizeGloss(current.gloss)) li.classList.add('hit');
         spotList.appendChild(li);
       });
-      decide(matched);
+      await decide(matched, myRound);
     }
 
-    async function decide(matched) {
+    async function decide(matched, myRound) {
       const res = applyResult({ attempts }, matched); attempts = res.attempts;
       if (res.outcome === 'match') {
         score.matched++; score.streak++; renderScore();
         setOverlay('✅ Matched <b>' + current.gloss + '</b>!');
-        await sleep(1400); nextRound();
+        await sleep(1400);
+        if (roundId !== myRound) return;     // Skip/Stop superseded us during the pause
+        nextRound();
       } else if (res.outcome === 'retry') {
         setOverlay('❌ Not in top-3 (attempt ' + attempts + '/' + MAX_ATTEMPTS + ') — Retry');
         retryBtn.hidden = false;
@@ -244,7 +267,10 @@
         score.revealed++; score.streak = 0; renderScore();
         setOverlay('Here it is — watch closely');
         refVideo.playbackRate = 0.5; refVideo.currentTime = 0; refVideo.play().catch(() => {});
-        await sleep(3000); refVideo.playbackRate = 1; nextRound();
+        await sleep(3000);
+        refVideo.playbackRate = 1;           // always restore, even if superseded
+        if (roundId !== myRound) return;
+        nextRound();
       }
     }
 
