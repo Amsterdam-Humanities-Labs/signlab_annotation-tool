@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SignRep Practice</title>
+  <style>/* styles added in Task 6 */</style>
+</head>
+<body>
+  <main id="app">
+    <section id="targetPanel">
+      <video id="refVideo" loop muted playsinline></video>
+      <div id="refGloss">—</div>
+    </section>
+    <section id="camPanel">
+      <video id="camPreview" autoplay muted playsinline></video>
+      <div id="overlay" aria-live="polite"></div>
+    </section>
+    <section id="timelineStrip"><div id="cursor"></div><div id="segLayer"></div></section>
+    <section id="resultsRow">
+      <ol id="spotList"></ol>
+      <div id="scoreboard">Streak 0 · 0/0</div>
+    </section>
+    <section id="controls">
+      <button id="startBtn" type="button">Start</button>
+      <button id="skipBtn" type="button">Skip</button>
+      <button id="retryBtn" type="button" hidden>Retry</button>
+      <button id="stopBtn" type="button">Stop</button>
+    </section>
+    <div id="errorBar" hidden></div>
+  </main>
+
+  <script type="module">
+    import {
+      buildTargetPool, isTopKMatch, pickSignSegment, pickNextTarget,
+      applyResult, normalizeGloss, MAX_ATTEMPTS,
+    } from './practice-core.js';
+
+    // ---- Inference servers (copied from webcam/index.html:617-623) ----
+    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const INFER_BASE = isLocal ? 'http://localhost:8000' : 'https://signcollect.nl/sign-spotter';
+    const SEG_BASE   = isLocal ? 'http://localhost:8001' : 'https://signcollect.nl/sign-segmenter';
+
+    // ---- Inference clients (copied from webcam/index.html, server path only) ----
+    async function inferUpload(blob) {                                   // :627-631
+      const r = await fetch(INFER_BASE + '/upload', { method: 'POST', body: blob });
+      if (!r.ok) throw new Error('upload_failed');
+      return (await r.json()).videoId;
+    }
+    async function inferSpot(videoId, start, end) {                      // :633-642
+      const r = await fetch(INFER_BASE + '/spot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId, start, end, topk: 10 }),
+      });
+      if (r.status === 409) throw new Error('no_video');
+      if (!r.ok) throw new Error('spot_failed');
+      return (await r.json()).glosses || [];
+    }
+    // serverConvert: upload original webm to the segmenter, get back {videoId, mp4}.
+    // (copied from webcam/index.html:648-675, convert-modal calls removed)
+    async function serverConvert(file) {
+      const videoId = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', SEG_BASE + '/upload');
+        xhr.responseType = 'json';
+        xhr.timeout = 290000;
+        xhr.onload = () => (xhr.status === 200 && xhr.response && xhr.response.videoId)
+          ? resolve(xhr.response.videoId) : reject(new Error('upload HTTP ' + xhr.status));
+        xhr.onerror = () => reject(new Error('upload network error'));
+        xhr.ontimeout = () => reject(new Error('upload timeout'));
+        xhr.send(file);
+      });
+      const r = await fetch(SEG_BASE + '/video/' + videoId);
+      if (!r.ok) throw new Error('video download HTTP ' + r.status);
+      const buf = await r.arrayBuffer();
+      return { videoId, file: new File([buf], 'attempt.mp4', { type: 'video/mp4' }) };
+    }
+    // segInfer by videoId → [{start,end}] (copied from webcam/index.html:681-701,
+    // videoId path only; throws on failure).
+    async function segInfer(videoId) {
+      const r = await fetch(SEG_BASE + '/segment', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId }),
+      });
+      if (!r.ok) throw new Error('segment HTTP ' + r.status);
+      const data = await r.json();
+      const segs = Array.isArray(data.segments) ? data.segments : [];
+      return segs.map(([s, e]) => ({ start: s, end: e }));
+    }
+
+    // ---- Boot: load glosses + vocab, build target pool ----
+    let GLOSS_ENTRIES = [], TARGET_POOL = [], recent = [];
+    const errorBar = document.getElementById('errorBar');
+    function fatal(msg) { errorBar.hidden = false; errorBar.textContent = msg; }
+
+    async function boot() {
+      try {
+        const [entries, vocabRes] = await Promise.all([
+          fetch('glosses_transformed.json').then(r => r.json()),
+          fetch(INFER_BASE + '/vocab').then(r => { if (!r.ok) throw new Error('vocab ' + r.status); return r.json(); }),
+        ]);
+        GLOSS_ENTRIES = entries;
+        TARGET_POOL = buildTargetPool(vocabRes.glosses || [], entries);
+        if (!TARGET_POOL.length) { fatal('No practiceable signs (vocab ∩ Signbank video is empty).'); return; }
+        await initCamera();
+        // Task 4 wires the state machine start here.
+      } catch (e) {
+        fatal('Cannot start practice: ' + e.message + '. The spotter /vocab endpoint must be reachable.');
+      }
+    }
+
+    // ---- Camera (copied pattern from webcam/index.html:3794-3818) ----
+    let camStream = null;
+    async function initCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+        throw new Error('No webcam access (getUserMedia). Use Chrome or Edge over HTTPS.');
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 50 } },
+        audio: false,
+      });
+      document.getElementById('camPreview').srcObject = camStream;
+    }
+
+    boot();
+  </script>
+</body>
+</html>
