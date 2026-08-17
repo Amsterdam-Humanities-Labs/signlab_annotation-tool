@@ -1,0 +1,120 @@
+<!doctype html><meta charset=utf-8><title>Cluster merge review</title>
+<style>
+ body{font:14px system-ui;margin:0;background:#111;color:#eee}
+ header{padding:10px 16px;background:#1b1b1b;position:sticky;top:0;display:flex;gap:16px;align-items:center;z-index:10}
+ header b{font-size:16px}
+ .stat{font-size:13px;color:#bbb}
+ .stat b{color:#fff}
+ #wrap{max-width:1100px;margin:0 auto;padding:18px}
+ #cos{text-align:center;font-size:22px;margin:6px 0 14px}
+ #cos b{color:#6c9cff}
+ .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+ .col{background:#1b1b1b;border:1px solid #333;border-radius:10px;padding:10px}
+ .colhead{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+ .colhead b{font-size:15px}
+ .badge{font-size:11px;padding:1px 7px;border-radius:10px;background:#333}
+ .gloss{font-size:12px;color:#889;font-style:italic}
+ .clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+ .vid{width:100%;aspect-ratio:3/4;background:#000;border-radius:5px;overflow:hidden}
+ video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+ .vlbl{font-size:10px;color:#9ab;margin-top:2px;text-align:center}
+ #bar{display:flex;gap:12px;justify-content:center;margin:20px 0 6px}
+ button.act{font-size:15px;padding:10px 22px;border-radius:8px;border:none;cursor:pointer;color:#fff}
+ .merge{background:#2a7d3f}.merge:hover{background:#349c4e}
+ .keep{background:#7d3a2a}.keep:hover{background:#9c4a34}
+ .skip{background:#444}.skip:hover{background:#555}
+ .nav{background:#333}.nav:hover{background:#444}
+ #hint{text-align:center;color:#778;font-size:12px;margin-top:8px}
+ #done{display:none;text-align:center;padding:60px;font-size:18px;color:#9c9}
+ select{background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:4px}
+ .prevdec{margin-left:auto;font-size:12px}
+ .tag{padding:1px 8px;border-radius:10px;font-size:11px}
+ .tag.m{background:#2a7d3f}.tag.k{background:#7d3a2a}
+</style>
+<header>
+ <b>Merge review</b>
+ <span class=stat>pair <b id=pos>–</b> / <b id=tot>–</b></span>
+ <span class=stat>merged <b id=nmerge>0</b> · kept <b id=nkeep>0</b> · left <b id=nleft>–</b></span>
+ <label class=stat>show <select id=filter>
+   <option value=undecided>undecided</option>
+   <option value=all>all</option>
+ </select></label>
+ <span class=prevdec id=prevdec></span>
+</header>
+<div id=wrap>
+ <div id=cos></div>
+ <div class=cols>
+  <div class=col id=colA></div>
+  <div class=col id=colB></div>
+ </div>
+ <div id=bar>
+  <button class="act nav" onclick="back()">◀ back</button>
+  <button class="act merge" onclick="decide('merge')">✓ Merge (M)</button>
+  <button class="act keep" onclick="decide('keep')">✗ Keep separate (K)</button>
+  <button class="act skip" onclick="next()">skip →</button>
+ </div>
+ <div id=hint>M = same sign, merge · K = different, keep apart · →/space skip · ←/back · decisions save automatically &amp; resume</div>
+</div>
+<div id=done>✓ All pairs reviewed. Nothing left to decide.<br><small>Switch "show" to <b>all</b> to revisit, or tell Claude to apply the merges.</small></div>
+<script>
+const IO="edit/merge_io.php";
+let pairs=[], dec={}, view=[], i=0;
+const $=id=>document.getElementById(id);
+function key(p){return p.a+"_"+p.b;}
+async function boot(){
+  const d=await (await fetch("out/merge_pairs.json")).json();
+  pairs=d.pairs;
+  try{dec=await (await fetch(IO)).json();}catch(e){dec={};}
+  if(typeof dec!=="object"||!dec)dec={};
+  $("tot").textContent=pairs.length;
+  buildView(); refreshCounts(); show();
+}
+function buildView(){
+  const f=$("filter").value;
+  view=pairs.map((p,idx)=>idx).filter(idx=>f==="all"?true:!dec[key(pairs[idx])]);
+  if(i>=view.length)i=Math.max(0,view.length-1);
+}
+function refreshCounts(){
+  let m=0,k=0;for(const v of Object.values(dec)){if(v.decision==="merge")m++;else if(v.decision==="keep")k++;}
+  $("nmerge").textContent=m;$("nkeep").textContent=k;
+  $("nleft").textContent=pairs.length-m-k;
+}
+function clipsHTML(arr){
+  return arr.map(c=>`<div><div class=vid><video src="${c.clip}" muted loop playsinline autoplay></video></div><div class=vlbl>${c.video} @${c.t}s</div></div>`).join("");
+}
+function stopVideos(){document.querySelectorAll("video").forEach(v=>{v.pause();v.removeAttribute("src");v.load();});}
+function show(){
+  if(view.length===0){$("wrap").style.display="none";$("done").style.display="block";return;}
+  $("wrap").style.display="";$("done").style.display="none";
+  const idx=view[i], p=pairs[idx];
+  $("pos").textContent=i+1;$("tot").textContent=(($("filter").value==="all")?pairs.length:view.length);
+  $("cos").innerHTML=`centroid similarity <b>${p.cos.toFixed(3)}</b>`;
+  const prev=dec[key(p)];
+  $("prevdec").innerHTML=prev?`already: <span class="tag ${prev.decision==='merge'?'m':'k'}">${prev.decision}</span>`:"";
+  $("colA").innerHTML=`<div class=colhead><b>#${p.a}</b><span class=badge>${p.sa} signs</span><span class=gloss>~${p.ga}</span></div><div class=clips>${clipsHTML(p.ca)}</div>`;
+  $("colB").innerHTML=`<div class=colhead><b>#${p.b}</b><span class=badge>${p.sb} signs</span><span class=gloss>~${p.gb}</span></div><div class=clips>${clipsHTML(p.cb)}</div>`;
+}
+async function decide(d){
+  if(view.length===0)return;
+  const p=pairs[view[i]];
+  dec[key(p)]={decision:d,ts:Date.now()};
+  refreshCounts();
+  fetch(IO,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({a:p.a,b:p.b,decision:d})}).catch(()=>{});
+  stopVideos();
+  // in 'undecided' view the current item disappears; in 'all' view advance
+  if($("filter").value==="undecided"){view.splice(i,1);if(i>=view.length)i=view.length;show();}
+  else next();
+}
+function next(){stopVideos();if(i<view.length-1){i++;show();}else if($("filter").value==="undecided"){show();}else{/*end*/}}
+function back(){stopVideos();if(i>0){i--;show();}}
+$("filter").onchange=()=>{i=0;buildView();show();};
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="SELECT")return;
+  if(e.key==="m"||e.key==="M")decide("merge");
+  else if(e.key==="k"||e.key==="K")decide("keep");
+  else if(e.key==="ArrowRight"||e.key===" "){e.preventDefault();next();}
+  else if(e.key==="ArrowLeft")back();
+});
+boot();
+</script>
