@@ -1,0 +1,31 @@
+# --- credentials: never commit ---
+.env
+.env.*
+!.env.example
+mysql_config.php
+mysql_config_test.php
+mysql_config.example.php.keep
+config.php
+config.php.backup*
+*.pem
+*.key
+
+# --- dependencies ---
+node_modules/
+vendor/
+
+# --- logs, caches, os cruft ---
+*.log
+logs/
+.DS_Store
+Thumbs.db
+
+# --- large assets excluded from git (GitHub rejects >100MB) ---
+clusters/vid/
+clusters/clips/
+clusters/out/
+/clusters/tool/vendor/ffmpeg/esm/ffmpeg-core.wasm
+/webcam/vendor/ffmpeg/esm/ffmpeg-core.wasm
+/v2/vendor/ffmpeg/esm/ffmpeg-core.wasm
+/v3/vendor/ffmpeg/esm/ffmpeg-core.wasm
+/v1/vendor/ffmpeg/esm/ffmpeg-core.wasm

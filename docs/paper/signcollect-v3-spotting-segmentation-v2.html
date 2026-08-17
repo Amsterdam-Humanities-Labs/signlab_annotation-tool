@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The SignCollect Annotation Tool v3: Automatic Sign Segmentation and Gloss Spotting</title>
+<style>
+  :root { --ink:#161616; --muted:#555; --rule:#cfcfcf; --accent:#1b3a6b; --soft:#eef2f8; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Times New Roman", Georgia, serif;
+    color: var(--ink); line-height: 1.42; font-size: 10.6pt;
+    max-width: 760px; margin: 0 auto; padding: 40px 34px 60px;
+    text-align: justify; hyphens: auto;
+  }
+  h1 { font-size: 19pt; line-height: 1.18; text-align: center; margin: 0 0 6px; }
+  .authors { text-align:center; font-size: 11pt; margin: 2px 0; }
+  .affil { text-align:center; font-size: 9.4pt; color: var(--muted); margin: 0 0 4px; font-style: italic; }
+  .meta { text-align:center; font-size: 9pt; color: var(--muted); margin: 0 0 18px; }
+  h2 { font-size: 12.2pt; margin: 20px 0 6px; border-bottom: 1.4px solid var(--rule); padding-bottom: 2px; }
+  h3 { font-size: 10.8pt; margin: 13px 0 4px; }
+  p { margin: 0 0 8px; }
+  .abstract { background: var(--soft); border: 1px solid #d8e0ee; border-radius: 6px;
+              padding: 12px 16px; font-size: 9.8pt; margin: 0 0 6px; }
+  .abstract h4 { margin: 0 0 4px; font-size: 10pt; text-transform: uppercase; letter-spacing:.5px; }
+  .keywords { font-size: 9.4pt; color: var(--muted); margin: 4px 0 0; }
+  figure { margin: 14px 0; text-align: center; page-break-inside: avoid; }
+  figure svg { max-width: 100%; height: auto; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 6px; text-align: left;
+               padding: 0 6px; }
+  figcaption b { color: var(--ink); }
+  table { border-collapse: collapse; width: 100%; font-size: 9.1pt; margin: 8px 0 4px; }
+  caption { caption-side: top; text-align: left; font-size: 9pt; color: var(--muted); margin-bottom: 4px; }
+  th, td { border-top: 1px solid var(--rule); padding: 3px 7px; text-align: center; }
+  th { border-bottom: 1.4px solid #999; }
+  td.l, th.l { text-align: left; }
+  tr.best td { font-weight: bold; }
+  code, .mono { font-family: "DejaVu Sans Mono", "Courier New", monospace; font-size: 8.8pt; }
+  .small { font-size: 8.8pt; color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  sup.cite { font-size: 8pt; line-height: 0; }
+  ol.refs { font-size: 9pt; line-height: 1.34; padding-left: 22px; }
+  ol.refs li { margin-bottom: 5px; }
+  .refsec { page-break-before: always; }
+  .cols { column-count: 1; }
+  hr.soft { border:0; border-top:1px solid var(--rule); margin: 18px 0; }
+  @page { size: A4; margin: 18mm 16mm; }
+  @media print { body { max-width: none; padding: 0; font-size: 10pt; } a { color: var(--ink); } }
+</style>
+</head>
+<body>
+
+<h1>The SignCollect Annotation Tool v3:<br>Automatic Sign Segmentation and Gloss Spotting in the Browser</h1>
+<p class="authors">G.&nbsp;Otterspeer</p>
+<p class="affil">SignCollect &middot; Global Signbank, University of Amsterdam</p>
+<p class="meta">Technical Report &middot; June 2026 (rev.&nbsp;2) &middot; <span class="mono">signcollect.nl/annotation-tool</span></p>
+<p class="small" style="border:1px solid #c9d3e4;background:#f3f6fb;padding:7px 10px;border-radius:5px;margin:8px 0 0">
+<b>Revision&nbsp;2 note.</b> Corrected against the deployed code and evaluation logs. Key changes vs.&nbsp;rev.&nbsp;1:
+the segmentation head is a <b>BiLSTM</b> (served as a BiLSTM&times;MS-TCN ensemble), not an MS-TCN; the deployed
+boundary&nbsp;F1 is <b>0.871</b> (rev.&nbsp;1's 0.801 and the Hiera/Hands-On comparison rows were not backed by an
+evaluation file); the spotter is a <b>two-backbone ensemble</b> with a real held-out benchmark (top-1 67.3&nbsp;/
+top-5 87.2 deployed); and the GPU host is a <b>multi-GPU server with forward SSH tunnels</b>, not a single TITAN&nbsp;RTX
+with reverse tunnels.</p>
+
+<div class="abstract">
+<h4>Abstract</h4>
+<p>We describe version 3 of the SignCollect annotation tool, a browser-based editor for
+multi-tier annotation of sign-language video that now closes the loop between
+<em>recording</em> and <em>annotation</em> by embedding two neural models directly into the
+editing workflow. When a user drops a clip into the tool, a <em>sign segmentation</em> model
+based on a frozen V-JEPA&nbsp;2 video backbone and a recurrent (BiLSTM) frame-labelling head
+partitions the continuous signing stream into individual sign segments; each resulting
+segment is then passed to a <em>sign-spotting</em> model that encodes the clip with a
+self-supervised sign representation (SignRep, built on a Hiera vision transformer) and
+matches it against a 10,254-gloss dictionary, returning a ranked list of candidate glosses.
+Both models run as warm GPU inference services reached over HTTPS, so the entire
+segment-then-gloss pipeline executes in seconds without the annotator leaving the page.
+On the Zin-in-NGT benchmark the deployed segmenter attains a boundary F1 of 0.871 using RGB alone
+(no pose extraction), via a BiLSTM&nbsp;&times;&nbsp;MS-TCN probability ensemble; the single
+BiLSTM head reaches 0.817&ndash;0.848 depending on frame rate. We detail the model architectures, the system design that makes them
+usable from a single-page application, and the resulting human-in-the-loop annotation
+workflow.</p>
+<p class="keywords"><b>Keywords:</b> sign language, NGT, annotation tooling, temporal
+segmentation, sign spotting, self-supervised video representation, Global Signbank.</p>
+</div>
+
+<h2>1&nbsp;&nbsp;Introduction</h2>
+<p>Constructing large sign-language repositories is bottlenecked less by recording than by
+<em>annotation</em>: raw video must be cut into individual signs and each sign must be
+labelled with a gloss linked to a lexical database. The SignCollect pipeline<sup class="cite">[1]</sup>
+addressed the capture side with a touchless, multi-view recording setup that lets the
+Sign&nbsp;Language of the Netherlands (NGT) lexicon in Global Signbank be extended quickly.
+The annotation tool described here addresses the downstream side, and version&nbsp;3 (v3)
+adds machine assistance to the two most repetitive manual steps&mdash;<em>temporal
+segmentation</em> and <em>gloss assignment</em>.</p>
+<p>The tool remains a single self-contained web application: a multi-tier timeline editor
+that loads a video (and optionally an existing ELAN <span class="mono">.eaf</span> file),
+lets an annotator create, move and label segments, and exports the result as EAF. v3 keeps
+this editor unchanged but augments it so that, on dropping a fresh clip, the timeline is
+<em>pre-populated</em> with predicted sign boundaries and each predicted segment is
+<em>pre-annotated</em> with the ten most likely glosses. The annotator's task shifts from
+authoring from scratch to verifying and correcting&mdash;a substantially faster mode of work.</p>
+<p>This report concentrates on the two models and the engineering that makes them usable
+from the browser. Section&nbsp;2 gives the system architecture. Sections&nbsp;3 and&nbsp;4
+describe the segmentation and spotting models. Section&nbsp;5 describes the human-in-the-loop
+workflow and deployment, Section&nbsp;6 reports benchmark results, and Section&nbsp;7
+discusses limitations.</p>
+
+<h2>2&nbsp;&nbsp;System overview</h2>
+<p>The browser application normalises every dropped video to 25&nbsp;frames per second and
+H.264 at &le;1080p (using an in-page WebAssembly build of FFmpeg) so that the models always
+receive a fixed frame rate. It then issues two kinds of HTTPS requests: a single
+<span class="mono">/segment</span> call carrying the whole clip, and one
+<span class="mono">/spot</span> call per detected segment. Neither model runs in the browser;
+each is a <em>warm</em> inference service&mdash;a long-lived process that loads its model
+weights once and keeps them resident on the GPU&mdash;so per-request latency is dominated by
+computation, not model loading.</p>
+<p>Because the GPU host is not publicly reachable, the public web server exposes the two
+services through Apache reverse-proxy paths (<span class="mono">/sign-spotter/</span> and
+<span class="mono">/sign-segmenter/</span>) that forward to local ports (8000 and 8001) bridged to the
+GPU host by persistent SSH tunnels (Figure&nbsp;1). Warm, this yields roughly
+1&nbsp;s per gloss-spotting call (a four-sign clip on an RTX&nbsp;6000&nbsp;Ada) and several
+seconds for whole-clip segmentation.</p>
+
+<figure>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" font-family="DejaVu Sans, Arial, sans-serif" font-size="11">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#1b3a6b"/>
+    </marker>
+  </defs>
+  <!-- browser -->
+  <rect x="8" y="78" width="120" height="84" rx="7" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="68" y="104" text-anchor="middle" font-weight="bold">Browser</text>
+  <text x="68" y="122" text-anchor="middle" font-size="9">single-page app</text>
+  <text x="68" y="136" text-anchor="middle" font-size="9">timeline + EAF</text>
+  <text x="68" y="150" text-anchor="middle" font-size="8.5" fill="#555">FFmpeg.wasm → 25 fps</text>
+  <!-- apache -->
+  <rect x="190" y="78" width="120" height="84" rx="7" fill="#fff" stroke="#1b3a6b"/>
+  <text x="250" y="104" text-anchor="middle" font-weight="bold">Apache</text>
+  <text x="250" y="122" text-anchor="middle" font-size="9">HTTPS reverse</text>
+  <text x="250" y="136" text-anchor="middle" font-size="9">proxy</text>
+  <text x="250" y="150" text-anchor="middle" font-size="8.5" fill="#555">/sign-spotter, /sign-segmenter</text>
+  <!-- tunnel -->
+  <rect x="372" y="78" width="116" height="84" rx="7" fill="#fff" stroke="#1b3a6b" stroke-dasharray="5 3"/>
+  <text x="430" y="108" text-anchor="middle" font-weight="bold">SSH</text>
+  <text x="430" y="126" text-anchor="middle" font-size="9">forward tunnels</text>
+  <text x="430" y="142" text-anchor="middle" font-size="8.5" fill="#555">:8000 / :8001</text>
+  <!-- gpu -->
+  <rect x="548" y="40" width="164" height="170" rx="7" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="630" y="62" text-anchor="middle" font-weight="bold">GPU host (warm)</text>
+  <rect x="566" y="74" width="128" height="58" rx="5" fill="#fff" stroke="#7a93bd"/>
+  <text x="630" y="94" text-anchor="middle" font-size="9.5" font-weight="bold">Segmenter</text>
+  <text x="630" y="108" text-anchor="middle" font-size="8.5">V-JEPA 2 + BiLSTM</text>
+  <text x="630" y="122" text-anchor="middle" font-size="8.5" fill="#555">POST /segment</text>
+  <rect x="566" y="140" width="128" height="58" rx="5" fill="#fff" stroke="#7a93bd"/>
+  <text x="630" y="160" text-anchor="middle" font-size="9.5" font-weight="bold">Spotter</text>
+  <text x="630" y="174" text-anchor="middle" font-size="8.5">SignRep / Hiera</text>
+  <text x="630" y="188" text-anchor="middle" font-size="8.5" fill="#555">POST /spot</text>
+  <!-- arrows -->
+  <line x1="128" y1="120" x2="188" y2="120" stroke="#1b3a6b" marker-end="url(#arr)"/>
+  <line x1="310" y1="120" x2="370" y2="120" stroke="#1b3a6b" marker-end="url(#arr)"/>
+  <line x1="488" y1="120" x2="546" y2="120" stroke="#1b3a6b" marker-end="url(#arr)"/>
+  <text x="158" y="113" text-anchor="middle" font-size="8" fill="#555">HTTPS</text>
+  <text x="630" y="232" text-anchor="middle" font-size="8.5" fill="#555">models loaded once, resident on GPU</text>
+</svg>
+<figcaption><b>Figure 1.</b> System architecture. The browser performs all editing locally and
+calls two stateless HTTPS endpoints. An Apache reverse proxy forwards them across persistent
+SSH tunnels to warm inference services on a multi-GPU host, which keep both models resident
+to minimise latency.</figcaption>
+</figure>
+
+<h2>3&nbsp;&nbsp;Sign segmentation model</h2>
+<p>The segmenter answers a single question for every frame: is the signer mid-sign, and where
+do signs begin and end? It is deliberately <em>RGB-only</em>&mdash;it needs no hand- or
+body-pose extraction&mdash;which removes a brittle and expensive preprocessing stage. The
+model has two parts: a large <em>frozen</em> video backbone that turns frames into rich
+features, and a small trained head that reads those features as a time series and emits
+boundaries (Figure&nbsp;2).</p>
+
+<h3>3.1&nbsp;&nbsp;Frozen V-JEPA&nbsp;2 backbone</h3>
+<p>Features come from V-JEPA&nbsp;2<sup class="cite">[2]</sup>, a ViT-L video encoder
+(<span class="mono">vjepa2-vitl-fpc64-256</span>) pre-trained self-supervisedly on over a
+million hours of general internet video&mdash;<em>not</em> on sign language. V-JEPA&nbsp;2 is a
+Joint-Embedding Predictive Architecture: rather than reconstructing pixels, it learns to
+predict the latent features of masked spatiotemporal regions, yielding representations that
+capture motion and scene dynamics. We use it strictly as a frozen feature extractor.</p>
+<p>The encoder is run on non-overlapping 16-frame chunks. Each forward pass produces a
+temporal grid of patch tokens which we pool into a 3&times;3 spatial grid, giving nine
+region tokens (one per region) of dimension 1024 for each of eight temporal positions in the
+chunk. To raise the effective temporal resolution to one token per frame, we use a
+<em>phase-dual</em> scheme: the backbone is run twice per chunk, once on the frames as-is and
+once on the same frames shifted by one, and the two phase-shifted token streams are
+interleaved. The result is a sequence of one 9&times;1024 region-token vector per frame at
+25&nbsp;Hz.</p>
+
+<h3>3.2&nbsp;&nbsp;Region BiLSTM head and BIO decoding</h3>
+<p>The trained head (<span class="mono">RegionBiLSTM</span>) first collapses the nine region
+tokens at each frame into a single vector using a small <em>learned-query attention pool</em>,
+so the model can weight, say, the dominant-hand region. The pooled per-frame sequence is then
+processed by a bidirectional LSTM, which reads the whole clip in both directions so each
+frame is labelled in the context of its neighbours. A temporal smoothing (T-MSE) loss
+discourages jittery frame-to-frame label flips. The deployed default further <em>ensembles</em>
+this BiLSTM with a sibling three-stage dilated-residual temporal convolutional head in the
+style of MS-TCN<sup class="cite">[5]</sup>, averaging their per-frame label probabilities; the
+ensemble is what the served model uses, while either head can run alone.</p>
+<p>The head emits, per token, one of three <em>BIO</em> labels&mdash;<span class="mono">OUT</span>
+(no sign), <span class="mono">IN</span> (inside a sign), <span class="mono">BEGIN</span>
+(first frame of a sign). The token labels are upsampled to the 25&nbsp;fps frame grid, lightly cleaned,
+and every maximal run of non-<span class="mono">OUT</span> frames is emitted as one
+<span class="mono">(start, end)</span> segment in seconds. These segments become the timeline
+boxes the annotator sees. The head was pre-trained on the German MeineDGS corpus and then
+fine-tuned on Zin-in-NGT, selecting the checkpoint with the best validation boundary F1.</p>
+
+<figure>
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" font-family="DejaVu Sans, Arial, sans-serif" font-size="10.5">
+  <defs>
+    <marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#1b3a6b"/>
+    </marker>
+  </defs>
+  <!-- frames -->
+  <text x="60" y="24" text-anchor="middle" font-weight="bold">Video @ 25 fps</text>
+  <g>
+    <rect x="18" y="34" width="20" height="26" fill="#dfe7f3" stroke="#7a93bd"/>
+    <rect x="40" y="34" width="20" height="26" fill="#dfe7f3" stroke="#7a93bd"/>
+    <rect x="62" y="34" width="20" height="26" fill="#dfe7f3" stroke="#7a93bd"/>
+    <rect x="84" y="34" width="20" height="26" fill="#dfe7f3" stroke="#7a93bd"/>
+    <text x="60" y="74" text-anchor="middle" font-size="8.5" fill="#555">16-frame chunks</text>
+  </g>
+  <!-- backbone -->
+  <rect x="150" y="22" width="150" height="74" rx="6" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="225" y="44" text-anchor="middle" font-weight="bold">V-JEPA 2 (frozen)</text>
+  <text x="225" y="60" text-anchor="middle" font-size="9">ViT-L video encoder</text>
+  <text x="225" y="76" text-anchor="middle" font-size="8.5" fill="#555">phase-dual, 3×3 regions</text>
+  <text x="225" y="89" text-anchor="middle" font-size="8.5" fill="#555">→ 1 token/frame · 9 × 1024</text>
+  <!-- attention pool -->
+  <rect x="346" y="22" width="120" height="74" rx="6" fill="#fff" stroke="#1b3a6b"/>
+  <text x="406" y="48" text-anchor="middle" font-weight="bold">Attention</text>
+  <text x="406" y="64" text-anchor="middle" font-weight="bold">pool</text>
+  <text x="406" y="82" text-anchor="middle" font-size="8.5" fill="#555">9 regions → 1</text>
+  <!-- TCN -->
+  <rect x="512" y="22" width="190" height="74" rx="6" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="607" y="44" text-anchor="middle" font-weight="bold">BiLSTM head</text>
+  <text x="607" y="60" text-anchor="middle" font-size="9">(+ MS-TCN ensemble)</text>
+  <text x="607" y="76" text-anchor="middle" font-size="8.5" fill="#555">full-sequence context</text>
+  <text x="607" y="89" text-anchor="middle" font-size="8.5" fill="#555">+ T-MSE smoothing</text>
+  <!-- arrows row 1 -->
+  <line x1="106" y1="47" x2="148" y2="55" stroke="#1b3a6b" marker-end="url(#arr2)"/>
+  <line x1="300" y1="59" x2="344" y2="59" stroke="#1b3a6b" marker-end="url(#arr2)"/>
+  <line x1="466" y1="59" x2="510" y2="59" stroke="#1b3a6b" marker-end="url(#arr2)"/>
+  <!-- BIO -->
+  <line x1="607" y1="96" x2="607" y2="130" stroke="#1b3a6b" marker-end="url(#arr2)"/>
+  <text x="607" y="150" text-anchor="middle" font-weight="bold">Per-frame BIO labels</text>
+  <g font-family="DejaVu Sans Mono, monospace" font-size="10">
+    <rect x="300" y="162" width="42" height="22" fill="#f3f4f6" stroke="#aaa"/><text x="321" y="177" text-anchor="middle">OUT</text>
+    <rect x="342" y="162" width="42" height="22" fill="#cfe0c8" stroke="#6a9a5b"/><text x="363" y="177" text-anchor="middle">BEG</text>
+    <rect x="384" y="162" width="42" height="22" fill="#dcebd6" stroke="#6a9a5b"/><text x="405" y="177" text-anchor="middle">IN</text>
+    <rect x="426" y="162" width="42" height="22" fill="#dcebd6" stroke="#6a9a5b"/><text x="447" y="177" text-anchor="middle">IN</text>
+    <rect x="468" y="162" width="42" height="22" fill="#f3f4f6" stroke="#aaa"/><text x="489" y="177" text-anchor="middle">OUT</text>
+    <rect x="510" y="162" width="42" height="22" fill="#cfe0c8" stroke="#6a9a5b"/><text x="531" y="177" text-anchor="middle">BEG</text>
+    <rect x="552" y="162" width="42" height="22" fill="#dcebd6" stroke="#6a9a5b"/><text x="573" y="177" text-anchor="middle">IN</text>
+  </g>
+  <line x1="447" y1="186" x2="447" y2="212" stroke="#1b3a6b" marker-end="url(#arr2)"/>
+  <text x="447" y="232" text-anchor="middle" font-weight="bold">Segments (start, end)</text>
+  <g>
+    <rect x="342" y="242" width="84" height="16" rx="3" fill="#9ec48f" stroke="#5d8a4e"/>
+    <rect x="510" y="242" width="60" height="16" rx="3" fill="#9ec48f" stroke="#5d8a4e"/>
+    <line x1="300" y1="266" x2="600" y2="266" stroke="#999"/>
+    <text x="300" y="278" font-size="8.5" fill="#555">timeline →</text>
+  </g>
+</svg>
+<figcaption><b>Figure 2.</b> Segmentation pipeline. A frozen V-JEPA&nbsp;2 backbone turns 25&nbsp;fps
+frames into one 9&times;1024 region-token vector per frame; an attention pool plus a BiLSTM
+head (ensembled with an MS-TCN sibling at serve time) labels each frame
+<span class="mono">OUT/IN/BEGIN</span>; contiguous
+non-<span class="mono">OUT</span> runs become timeline segments.</figcaption>
+</figure>
+
+<h2>4&nbsp;&nbsp;Sign-spotting model</h2>
+<p>Given a segment, the spotter proposes which lexical sign it is. It treats spotting as
+<em>nearest-neighbour retrieval in an embedding space</em><sup class="cite">[6]</sup> rather
+than as fixed-class classification, which lets the vocabulary grow simply by adding
+dictionary entries&mdash;no retraining required.</p>
+
+<h3>4.1&nbsp;&nbsp;SignRep encoder</h3>
+<p>The segment clip is encoded by SignRep<sup class="cite">[3]</sup>, a self-supervised sign
+representation built on a Hiera hierarchical vision transformer<sup class="cite">[4]</sup>.
+SignRep is trained as a masked autoencoder that injects sign-specific inductive priors
+(skeleton-based cues) during pre-training but, crucially, requires <em>no</em> keypoints at
+inference time; it also uses feature regularisation and a style-agnostic adversarial loss to
+make the embedding robust to signer appearance. The encoder maps a variable-length clip to a
+single 768-dimensional embedding vector.</p>
+<p>The base SignRep encoder is adapted to NGT by supervised-contrastive fine-tuning. The
+deployed spotter is in fact a small <em>ensemble</em> of two such fine-tuned backbones (two
+independent fine-tuning rounds): each segment is embedded by both, scored against the
+dictionary, and the two score lists are combined by per-segment z-normalised fusion. This
+ensemble is the default served configuration; a single backbone can be used as a lighter
+fallback.</p>
+
+<h3>4.2&nbsp;&nbsp;Dictionary matching</h3>
+<p>Each gloss in the reference lexicon is represented by a pre-computed embedding. At query
+time the segment embedding is compared by cosine similarity against the full dictionary, and
+the ten highest-scoring glosses are returned with their scores (Figure&nbsp;3). The deployed
+dictionary is the full-coverage set of <b>10,254 glosses</b>, built from the Zin-in-NGT
+ground-truth signs together with the Global Signbank studio clips, so the spotter can in
+principle propose any sign in that lexicon. In the editor these ten candidates appear in a
+dropdown beneath the segment; clicking one fills the segment's gloss field, and hovering a
+candidate previews its reference video.</p>
+
+<figure>
+<svg viewBox="0 0 720 226" xmlns="http://www.w3.org/2000/svg" font-family="DejaVu Sans, Arial, sans-serif" font-size="10.5">
+  <defs>
+    <marker id="arr3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#1b3a6b"/>
+    </marker>
+  </defs>
+  <!-- clip -->
+  <rect x="14" y="86" width="96" height="54" rx="6" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="62" y="108" text-anchor="middle" font-weight="bold">Segment</text>
+  <text x="62" y="124" text-anchor="middle" font-size="9" fill="#555">one sign clip</text>
+  <!-- encoder -->
+  <rect x="150" y="80" width="150" height="66" rx="6" fill="#fff" stroke="#1b3a6b"/>
+  <text x="225" y="104" text-anchor="middle" font-weight="bold">SignRep encoder</text>
+  <text x="225" y="120" text-anchor="middle" font-size="9">Hiera ViT, self-supervised</text>
+  <text x="225" y="135" text-anchor="middle" font-size="8.5" fill="#555">RGB only, no keypoints</text>
+  <!-- embedding -->
+  <g>
+    <rect x="338" y="98" width="20" height="30" fill="#dfe7f3" stroke="#7a93bd"/>
+    <rect x="358" y="98" width="20" height="30" fill="#cdd9ee" stroke="#7a93bd"/>
+    <rect x="378" y="98" width="20" height="30" fill="#bccbe6" stroke="#7a93bd"/>
+    <text x="368" y="146" text-anchor="middle" font-size="8.5" fill="#555">embedding</text>
+  </g>
+  <!-- dict -->
+  <rect x="430" y="22" width="150" height="80" rx="6" fill="#eef2f8" stroke="#1b3a6b"/>
+  <text x="505" y="44" text-anchor="middle" font-weight="bold">Gloss dictionary</text>
+  <text x="505" y="60" text-anchor="middle" font-size="9">10,254 glosses</text>
+  <text x="505" y="76" text-anchor="middle" font-size="8.5" fill="#555">pre-computed embeddings</text>
+  <text x="505" y="90" text-anchor="middle" font-size="8.5" fill="#555">Zin-in-NGT + Signbank</text>
+  <!-- cosine -->
+  <rect x="430" y="120" width="150" height="44" rx="6" fill="#fff" stroke="#1b3a6b"/>
+  <text x="505" y="140" text-anchor="middle" font-weight="bold">Cosine match</text>
+  <text x="505" y="156" text-anchor="middle" font-size="8.5" fill="#555">nearest neighbours</text>
+  <!-- topk -->
+  <rect x="612" y="86" width="96" height="96" rx="6" fill="#fff" stroke="#1b3a6b"/>
+  <text x="660" y="104" text-anchor="middle" font-weight="bold" font-size="10">Top-10</text>
+  <g font-size="8.3" fill="#333" text-anchor="start">
+    <text x="624" y="120">1. GA-MAAR-A</text>
+    <text x="624" y="133">2. PT-BHAND</text>
+    <text x="624" y="146">3. AAN-JOU</text>
+    <text x="624" y="159">…</text>
+    <text x="624" y="174" fill="#555">+ scores</text>
+  </g>
+  <!-- arrows -->
+  <line x1="110" y1="113" x2="148" y2="113" stroke="#1b3a6b" marker-end="url(#arr3)"/>
+  <line x1="300" y1="113" x2="334" y2="113" stroke="#1b3a6b" marker-end="url(#arr3)"/>
+  <line x1="400" y1="113" x2="428" y2="135" stroke="#1b3a6b" marker-end="url(#arr3)"/>
+  <line x1="505" y1="102" x2="505" y2="118" stroke="#1b3a6b" marker-end="url(#arr3)"/>
+  <line x1="580" y1="135" x2="610" y2="130" stroke="#1b3a6b" marker-end="url(#arr3)"/>
+</svg>
+<figcaption><b>Figure 3.</b> Sign-spotting pipeline. A segment clip is encoded by SignRep
+(a Hiera-based self-supervised model) into one embedding, which is matched by cosine
+similarity against 10,254 pre-computed gloss embeddings; the ten nearest glosses are
+returned for the annotator to choose from.</figcaption>
+</figure>
+
+<h2>5&nbsp;&nbsp;Annotation workflow and deployment</h2>
+<p>The two models are wired into the editor as a single drop-to-annotate flow:</p>
+<p style="margin-left:14px;">
+<b>(1)</b> The annotator drops a video; it is normalised to 25&nbsp;fps in-page.&nbsp;
+<b>(2)</b> If the clip has no existing segments, the whole video is sent once to
+<span class="mono">/segment</span> while an indeterminate progress bar is shown.&nbsp;
+<b>(3)</b> Returned segments populate a timeline tier.&nbsp;
+<b>(4)</b> Each new segment is sent to <span class="mono">/spot</span>; its dropdown first
+shows a spinner, then the top-10 glosses.&nbsp;
+<b>(5)</b> The annotator confirms or edits boundaries and picks glosses, then exports EAF.</p>
+<p>Segmentation runs only when a clip arrives without annotations, so dropping a video
+alongside an existing EAF leaves the human's work untouched; a button re-runs segmentation on
+demand. The spotter is also invoked whenever the annotator creates a segment by hand, so the
+assistance is available throughout editing, not only at import.</p>
+<p>Operationally, both services are long-lived HTTP servers that load their model once and
+keep it warm. The segmenter is single-process and serialises its GPU calls; the spotter runs
+a small pool of replicas&mdash;one per GPU&mdash;so independent spotting requests can run in
+parallel across the host's GPUs. They were deployed on a shared, multi-GPU CUDA host; the
+public site reaches them only through the reverse-proxy and SSH-tunnel path of Figure&nbsp;1.
+Health endpoints report which model and dictionary are
+live so operators can confirm the correct configuration is serving (the live spotter reports
+the 10,254-gloss coverage dictionary; the live segmenter reports the BiLSTM&times;MS-TCN
+ensemble profile).</p>
+
+<h2>6&nbsp;&nbsp;Results</h2>
+<h3>6.1&nbsp;&nbsp;Segmentation</h3>
+<p>Table&nbsp;1 reports segmentation quality on the Zin-in-NGT test split (345 sentences),
+using RGB alone. The headline metric is <em>boundary F1</em>: predicted and reference segment
+boundaries (start/end times) are matched greedily one-to-one within a &plusmn;0.1&nbsp;s
+tolerance, and F1 is taken over those matches&mdash;it measures boundary <em>timing</em>, not
+frame accuracy or segment count. The deployed model&mdash;a BiLSTM&nbsp;&times;&nbsp;MS-TCN
+probability ensemble&mdash;reaches a boundary F1 of <b>0.871</b> and a segment F1 of 0.800.
+A single BiLSTM head reaches 0.817 at 25&nbsp;fps and 0.848 at 50&nbsp;fps (finer frame rate
+&rArr; finer boundary timing); the MS-TCN head alone is slightly lower (0.806). Table&nbsp;2
+summarises cross-lingual transfer to held-out German (MeineDGS) signing, where performance is
+lower&mdash;as expected for a model fine-tuned on NGT&mdash;but still substantial. All figures
+are taken from the model's own evaluation logs; features were extracted on GPU.</p>
+
+<table>
+  <caption><b>Table 1.</b> Sign segmentation on Zin-in-NGT (345 sentences), RGB input, boundary
+  tolerance &plusmn;0.1&nbsp;s. &plusmn;4f = within 4 frames. Higher is better.</caption>
+  <thead>
+    <tr><th class="l">V-JEPA&nbsp;2 head</th><th>fps</th><th>Bnd F1</th><th>Bnd F1 ±4f</th><th>Seg F1</th></tr>
+  </thead>
+  <tbody>
+    <tr class="best"><td class="l">BiLSTM &times; MS-TCN ensemble (deployed)</td><td>50</td><td>0.871</td><td>0.908</td><td>0.800</td></tr>
+    <tr><td class="l">BiLSTM</td><td>50</td><td>0.848</td><td>0.908</td><td>0.750</td></tr>
+    <tr><td class="l">BiLSTM</td><td>25</td><td>0.817</td><td>&mdash;</td><td>0.750</td></tr>
+    <tr><td class="l">MS-TCN</td><td>25</td><td>0.806</td><td>0.903</td><td>0.739</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <caption><b>Table 2.</b> Cross-lingual transfer to held-out MeineDGS/DGS (boundary / segment F1).</caption>
+  <thead><tr><th class="l">V-JEPA&nbsp;2 / Hiera head</th><th>Boundary F1</th><th>Segment F1</th></tr></thead>
+  <tbody>
+    <tr><td class="l">V-JEPA&nbsp;2 (MS-TCN head)</td><td>0.643</td><td>0.481</td></tr>
+    <tr><td class="l">Hiera (MS-TCN head)</td><td>0.655</td><td>0.502</td></tr>
+  </tbody>
+</table>
+
+<h3>6.2&nbsp;&nbsp;Spotting</h3>
+<p>Unlike v1 of this report, the spotter <em>is</em> evaluated on a fixed, leakage-guarded
+held-out set: 249 Zin-in-NGT sentences, lexical sign segments only, exact-gloss match against
+ground-truth boundaries. Table&nbsp;3 gives top-1 and top-5 retrieval accuracy. The deployed
+configuration (the 10,254-gloss coverage dictionary with the two-backbone ensemble) reaches
+top-1 67.3&nbsp;/ top-5 87.2; restricting to the smaller, in-distribution 1,818-gloss accuracy
+dictionary raises this to <b>71.2&nbsp;/ 91.0</b> at the cost of vocabulary. Because the tool
+surfaces a top-10 list for human confirmation rather than a single decision, the top-5 figure
+is the operationally relevant one. Warm latency is about 1&nbsp;s per spotting call on an
+RTX&nbsp;6000&nbsp;Ada; identical re-spots are cached.</p>
+
+<table>
+  <caption><b>Table 3.</b> Sign spotting on the held-out Zin-in-NGT bench (249 sentences,
+  lexical signs, exact match). Two-backbone ensemble. Higher is better.</caption>
+  <thead><tr><th class="l">Dictionary</th><th>Glosses</th><th>Top-1</th><th>Top-5</th></tr></thead>
+  <tbody>
+    <tr><td class="l">Coverage (deployed)</td><td>10,254</td><td>0.673</td><td>0.872</td></tr>
+    <tr class="best"><td class="l">Accuracy (best top-k)</td><td>1,818</td><td>0.712</td><td>0.910</td></tr>
+  </tbody>
+</table>
+
+<h2>7&nbsp;&nbsp;Discussion and limitations</h2>
+<p>The design choice that matters most for annotation throughput is that both models are
+<em>RGB-only</em>: removing pose estimation eliminates a fragile dependency and lets the whole
+pipeline run from the normalised clip the browser already holds. Framing both tasks around a
+frozen, general-purpose video backbone (V-JEPA&nbsp;2) plus a light task head, and framing
+spotting as dictionary retrieval, keeps the trained components small and the vocabulary
+open-ended.</p>
+<p>Limitations remain. Segmentation is fine-tuned on NGT and degrades on other sign languages
+(Table&nbsp;2). The spotter returns candidates, not decisions: rare or out-of-dictionary signs
+may not appear in the top ten, and the ranked list is meant to be verified, never trusted
+blindly. Latency, while interactive, is bounded by per-call GPU execution (segmentation is
+serialised; spotting is parallelised across the host's GPUs), so very long clips with many
+segments are spotted progressively rather than instantly. Finally, the present
+report quantifies segmentation and spotting accuracy but not end-to-end annotation time saved;
+a user study comparing manual versus assisted annotation is the natural next step.</p>
+
+<h2>8&nbsp;&nbsp;Conclusion</h2>
+<p>SignCollect annotation tool v3 turns a manual sign-language editor into a human-in-the-loop
+system: drop a clip, and a frozen-backbone segmenter proposes the sign boundaries while a
+self-supervised spotter proposes the glosses, all from the browser. Together with the
+SignCollect recording pipeline<sup class="cite">[1]</sup>, this shortens the path from raw
+video to a glossed, Signbank-linked EAF, supporting the rapid extension of the NGT lexicon
+in Global Signbank.</p>
+
+<hr class="soft">
+<p class="small"><b>Reproducibility.</b> Model identifiers and code references are listed below.
+Benchmark features were extracted on GPU under mixed precision; CPU inference may shift a few
+borderline boundary frames.</p>
+
+<div class="refsec">
+<h2>References and models used</h2>
+<ol class="refs">
+  <li>G.&nbsp;Otterspeer, M.&nbsp;Klomp, and F.&nbsp;Roelofsen. <i>SignCollect: A &lsquo;Touchless&rsquo;
+    Pipeline for Constructing Large-scale Sign Language Repositories.</i> LREC-COLING 2024,
+    11th Workshop on the Representation and Processing of Sign Languages.
+    <a href="https://aclanthology.org/2024.signlang-1.30/">aclanthology.org/2024.signlang-1.30</a>.</li>
+  <li>Meta AI (Assran et&nbsp;al.). <i>V-JEPA&nbsp;2: Self-Supervised Video Models Enable
+    Understanding, Prediction and Planning.</i> arXiv:2506.09985, 2025.
+    <a href="https://arxiv.org/abs/2506.09985">arxiv.org/abs/2506.09985</a>. Backbone weights:
+    <a href="https://huggingface.co/facebook/vjepa2-vitl-fpc64-256">huggingface.co/facebook/vjepa2-vitl-fpc64-256</a>.</li>
+  <li>R.&nbsp;Wong, N.&nbsp;C.&nbsp;Camgoz, and R.&nbsp;Bowden. <i>SignRep: Enhancing
+    Self-Supervised Sign Representations.</i> arXiv:2503.08529, 2025.
+    <a href="https://arxiv.org/abs/2503.08529">arxiv.org/abs/2503.08529</a>.</li>
+  <li>C.&nbsp;Ryali et&nbsp;al. <i>Hiera: A Hierarchical Vision Transformer without the
+    Bells-and-Whistles.</i> ICML 2023. arXiv:2306.00989.
+    <a href="https://arxiv.org/abs/2306.00989">arxiv.org/abs/2306.00989</a>;
+    code <a href="https://github.com/facebookresearch/hiera">github.com/facebookresearch/hiera</a>.</li>
+  <li>Y.&nbsp;Abu&nbsp;Farha and J.&nbsp;Gall. <i>MS-TCN: Multi-Stage Temporal Convolutional
+    Network for Action Segmentation.</i> CVPR 2019. arXiv:1903.01945.
+    <a href="https://arxiv.org/abs/1903.01945">arxiv.org/abs/1903.01945</a>.</li>
+  <li>L.&nbsp;Momeni et&nbsp;al. <i>Scaling Up Sign Spotting Through Sign Language
+    Dictionaries.</i> International Journal of Computer Vision, 2022. arXiv:2205.04152.
+    <a href="https://arxiv.org/abs/2205.04152">arxiv.org/abs/2205.04152</a>.</li>
+  <li>Public DGS Corpus (MeineDGS), Universität Hamburg &mdash; segmentation-head pre-training
+    corpus. <a href="https://www.sign-lang.uni-hamburg.de/meinedgs/">sign-lang.uni-hamburg.de/meinedgs</a>.</li>
+  <li>Global Signbank (NGT) &mdash; reference lexicon and studio clips used for the spotting
+    dictionary. <a href="https://signbank.cls.ru.nl/">signbank.cls.ru.nl</a>.</li>
+  <li>Tool and inference services: <i>annotation-tool</i>, <i>signrep-spotter</i>, and
+    <i>vjepa-sign-segmentation</i>. <a href="https://signcollect.nl/annotation-tool/">signcollect.nl/annotation-tool</a>.</li>
+</ol>
+</div>
+
+</body>
+</html>

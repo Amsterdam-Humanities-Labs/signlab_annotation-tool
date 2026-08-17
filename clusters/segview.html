@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Segmentation preview</title>
+<!-- Lightweight read-only segmentation viewer. Plays the video directly from its URL
+     (no upload / no conversion / no server) and overlays predicted segments +
+     per-segment confidence parsed from the per-video EAF.
+     Usage: segview.html?video=<videoUrl>&eaf=<eafUrl> -->
+<style>
+  body{font:14px system-ui;margin:0;background:#111;color:#eee}
+  header{padding:8px 14px;background:#1b1b1b;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  a{color:#6cf}
+  #wrap{padding:14px;max-width:1000px;margin:0 auto}
+  video{width:100%;background:#000;border-radius:6px}
+  #tl{position:relative;height:56px;margin-top:8px;background:#1b1b1b;border-radius:6px;overflow:hidden}
+  .seg{position:absolute;top:6px;bottom:6px;border-radius:3px;cursor:pointer;box-sizing:border-box;border:1px solid rgba(255,255,255,.25)}
+  .seg:hover{outline:2px solid #fff}
+  #play{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none}
+  #tip{position:fixed;background:#000;border:1px solid #555;padding:4px 8px;border-radius:4px;font-size:12px;pointer-events:none;display:none;z-index:9}
+  .legend{font-size:12px;color:#aaa}
+</style>
+<header>
+  <b>Segmentation preview</b>
+  <span id="meta"></span>
+  <span class="legend">confidence: <span style="color:hsl(0,70%,55%)">low</span> → <span style="color:hsl(120,70%,45%)">high</span></span>
+  <a id="vlist" href="videos.html">← all videos</a>
+</header>
+<div id="wrap">
+  <video id="v" controls preload="metadata"></video>
+  <div id="tl"><div id="play"></div></div>
+  <div id="tip"></div>
+  <div id="err" style="color:#f88;margin-top:8px"></div>
+</div>
+<script>
+const p = new URLSearchParams(location.search);
+const videoUrl = p.get('video'), eafUrl = p.get('eaf');
+const v = document.getElementById('v'), tl = document.getElementById('tl');
+const tip = document.getElementById('tip'), err = document.getElementById('err');
+let segs = [];
+
+if (!videoUrl || !eafUrl) { err.textContent = 'Missing ?video= or ?eaf= param.'; }
+else { v.src = videoUrl; loadEaf(); }
+
+async function loadEaf() {
+  try {
+    const xml = await (await fetch(eafUrl)).text();
+    const d = new DOMParser().parseFromString(xml, 'text/xml');
+    const slot = {};
+    d.querySelectorAll('TIME_SLOT').forEach(ts =>
+      slot[ts.getAttribute('TIME_SLOT_ID')] = +ts.getAttribute('TIME_VALUE') / 1000);
+    const conf = {};
+    d.querySelectorAll('TIER[TIER_ID="confidence"] ALIGNABLE_ANNOTATION').forEach(a => {
+      const s = slot[a.getAttribute('TIME_SLOT_REF1')];
+      conf[s.toFixed(3)] = parseFloat(a.querySelector('ANNOTATION_VALUE')?.textContent || '0');
+    });
+    d.querySelectorAll('TIER[TIER_ID="predicted"] ALIGNABLE_ANNOTATION').forEach(a => {
+      const s = slot[a.getAttribute('TIME_SLOT_REF1')], e = slot[a.getAttribute('TIME_SLOT_REF2')];
+      segs.push({ s, e, g: a.querySelector('ANNOTATION_VALUE')?.textContent || '', c: conf[s.toFixed(3)] ?? null });
+    });
+    document.getElementById('meta').textContent = `${segs.length} segments`;
+    if (v.duration) draw(); else v.addEventListener('loadedmetadata', draw, { once: true });
+  } catch (e) { err.textContent = 'Failed to load EAF: ' + e.message; }
+}
+
+function col(c) { return c == null ? '#888' : `hsl(${Math.round(c * 120)},70%,45%)`; }
+
+function draw() {
+  const D = v.duration || segs.reduce((m, s) => Math.max(m, s.e), 1);
+  document.querySelectorAll('.seg').forEach(n => n.remove());
+  for (const s of segs) {
+    const d = document.createElement('div');
+    d.className = 'seg';
+    d.style.left = (100 * s.s / D) + '%';
+    d.style.width = Math.max(0.2, 100 * (s.e - s.s) / D) + '%';
+    d.style.background = col(s.c);
+    d.onclick = () => { v.currentTime = s.s; v.play(); };
+    d.onmousemove = ev => {
+      tip.style.display = 'block'; tip.style.left = (ev.clientX + 12) + 'px'; tip.style.top = (ev.clientY + 12) + 'px';
+      tip.textContent = `${s.s.toFixed(2)}–${s.e.toFixed(2)}s  (${(s.e - s.s).toFixed(2)}s)` +
+        (s.c != null ? `  conf ${s.c.toFixed(2)}` : '') + (s.g ? `  ${s.g}` : '');
+    };
+    d.onmouseleave = () => tip.style.display = 'none';
+    tl.appendChild(d);
+  }
+}
+const play = document.getElementById('play');
+v.addEventListener('timeupdate', () => {
+  const D = v.duration || 1; play.style.left = (100 * v.currentTime / D) + '%';
+});
+</script>

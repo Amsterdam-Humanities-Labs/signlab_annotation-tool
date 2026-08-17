@@ -1,0 +1,162 @@
+<!doctype html><meta charset=utf-8><title>HoReCo Sign Clusters</title>
+<style>
+ body{font:14px system-ui;margin:0;background:#111;color:#eee}
+ header{padding:10px 16px;background:#1b1b1b;position:sticky;top:0;display:flex;gap:12px;align-items:center}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;padding:16px}
+ .card{background:#1b1b1b;border:1px solid #333;border-radius:8px;padding:8px}
+ .card.novel{border-color:#c80}
+ .vid{width:100%;aspect-ratio:3/4;background:#000;border-radius:4px;overflow:hidden}
+ video{width:100%;height:100%;object-fit:contain;border-radius:4px;background:#000;display:block}
+ .g{cursor:pointer;padding:2px 4px;border-radius:3px}.g:hover{background:#333}
+ .badge{font-size:11px;padding:1px 6px;border-radius:10px;background:#333;margin-left:4px}
+ .catchip{font-size:11px;padding:1px 6px;border-radius:10px;background:#244;margin-left:4px;color:#9cf}
+ input,select{background:#222;color:#eee;border:1px solid #444;border-radius:4px;padding:4px}
+ .card .vid{cursor:pointer}
+ .more{cursor:pointer;color:#9cf;font-size:12px;margin-left:6px;text-decoration:underline}
+ #modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:1000;display:none;flex-direction:column}
+ #modal.open{display:flex}
+ #modalHead{padding:10px 16px;background:#1b1b1b;display:flex;gap:12px;align-items:center;position:sticky;top:0}
+ #modalHead b{font-size:16px}
+ #modalGrid{overflow:auto;padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+ #modalGrid .mc{background:#1b1b1b;border:1px solid #333;border-radius:6px;padding:5px}
+ #modalGrid .mc .vid{cursor:pointer}
+ #modalGrid .mc small{color:#9ab;font-size:11px}
+ #closeModal{margin-left:auto;cursor:pointer;background:#a33;border:none;color:#fff;border-radius:4px;padding:6px 12px}
+ #pager button{background:#333;color:#eee;border:1px solid #555;border-radius:4px;padding:3px 8px;cursor:pointer}
+ #pager button:disabled{opacity:.4;cursor:default}
+ #pager span{font-size:12px;color:#ccc}
+</style>
+<header>
+ <b>Sign clusters</b>
+ <select id=sort><option value=size>by size</option><option value=novel>novel first</option></select>
+ <select id=cat><option value="">All</option><option value=horeco>horeco</option><option value=health_holland>health_holland</option></select>
+ <label><input type=checkbox id=novelOnly> novel only</label>
+ <label><input type=checkbox id=lowOnly> low-conf only</label>
+ <input id=q placeholder="search gloss">
+ <button id=save>Download cluster_labels.json</button>
+ <a href="merge.html" style="color:#6c9cff;font-size:13px">⇄ merge review</a>
+ <span id=stat></span>
+ <span id=pager style="margin-left:auto;display:flex;gap:6px;align-items:center"></span>
+</header>
+<div class=grid id=grid></div>
+<div id=modal>
+ <div id=modalHead>
+  <b id=modalTitle></b><span id=modalSub></span>
+  <button id=closeModal onclick="closeCluster()">✕ close</button>
+ </div>
+ <div id=modalGrid></div>
+</div>
+<script>
+const DATA="out/", labels={};
+let clusters=[], segById={};
+async function boot(){
+  clusters=await (await fetch(DATA+"clusters.json")).json();
+  const segs=await (await fetch(DATA+"segments.json")).json();
+  segs.forEach(s=>segById[s.seg_id]=s);
+  render();
+}
+function catChip(cats){
+  if(!cats)return '';
+  const short={horeco:'horeco',health_holland:'hh'};
+  const parts=Object.keys(cats).map(k=>`${short[k]||k}:${cats[k]}`);
+  return parts.length?`<span class=catchip>${parts.join(' ')}</span>`:'';
+}
+// Lazy video mount: create a <video> only while the card is on-screen, release it
+// when it scrolls away — keeps simultaneous players far under Chrome's ~75 limit.
+function newVideoObserver(root){
+  return new IntersectionObserver(entries=>{
+    for(const e of entries){
+      const holder=e.target.querySelector('.vid');
+      if(!holder)continue;
+      if(e.isIntersecting){
+        if(!holder.firstChild && holder.dataset.clip){
+          const v=document.createElement('video');
+          v.src=holder.dataset.clip;v.muted=true;v.loop=true;v.playsInline=true;v.autoplay=true;
+          holder.appendChild(v);v.play().catch(()=>{});
+        }
+      }else if(holder.firstChild){
+        const v=holder.firstChild;v.pause();v.removeAttribute('src');v.load();holder.removeChild(v);
+      }
+    }
+  },{root:root||null,rootMargin:'120px'});
+}
+const TS=/\d\d:\d\d:\d\d/;                 // drop bogus timecode "glosses"
+function cleanTop(t10){return (t10||[]).filter(t=>!TS.test(t[0]));}
+let io=null, page=0; const PAGE_SIZE=120;
+function gotoPage(n){page=n;render();window.scrollTo(0,0);}
+function renderPager(total){
+  const pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  if(page>=pages)page=pages-1; if(page<0)page=0;
+  const p=document.getElementById('pager');
+  if(total<=PAGE_SIZE){p.innerHTML='';return;}
+  const btn=(lbl,to,dis)=>`<button ${dis?'disabled':''} onclick="gotoPage(${to})">${lbl}</button>`;
+  p.innerHTML=btn('« eerste',0,page===0)+btn('‹ vorige',page-1,page===0)+
+    `<span>pagina <b>${page+1}</b> / ${pages}</span>`+
+    btn('volgende ›',page+1,page>=pages-1)+btn('laatste »',pages-1,page>=pages-1);
+}
+function render(){
+  const sort=document.getElementById('sort').value;
+  const cat=document.getElementById('cat').value;
+  const no=document.getElementById('novelOnly').checked;
+  const lo=document.getElementById('lowOnly').checked;
+  const q=document.getElementById('q').value.toUpperCase();
+  let cs=clusters.filter(c=>c.size>0 && c.cluster_id>=0);
+  if(cat)cs=cs.filter(c=>c.categories&&(cat in c.categories));
+  if(no)cs=cs.filter(c=>c.novelty);
+  if(lo)cs=cs.filter(c=>c.low_conf_count>0);
+  if(q)cs=cs.filter(c=>cleanTop(c.top10).some(t=>t[0].toUpperCase().includes(q)));
+  cs.sort(sort=='size'?(a,b)=>b.size-a.size:(a,b)=>(b.novelty-a.novelty)||b.size-a.size);
+  document.getElementById('stat').textContent=`${cs.length} clusters`;
+  renderPager(cs.length);
+  const pageItems=cs.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
+  if(io)io.disconnect();
+  io=newVideoObserver();
+  const html=pageItems.map(c=>{
+    const ex=segById[c.exemplar_seg_id];
+    const top=cleanTop(c.top10);
+    return `<div class="card${c.novelty?' novel':''}">
+      <div class=vid data-clip="${ex?ex.clip:''}" onclick="openCluster(${c.cluster_id})" title="Bekijk alle ${c.size} gebaren"></div>
+      <div>#${c.cluster_id} <span class=badge>${c.size}</span>${catChip(c.categories)}${c.novelty?'<span class=badge style="background:#c80">new?</span>':''}${c.low_conf_count?`<span class=badge style="background:#a33">${c.low_conf_count} low</span>`:''}<span class=more onclick="openCluster(${c.cluster_id})">alle ${c.size} ▸</span></div>
+      <div>${top.map(t=>`<span class=g onclick="pick(${c.cluster_id},'${t[0]}')">${t[0]} <small>${t[1].toFixed(2)}</small></span>`).join('')}</div>
+      <input placeholder="confirm / new gloss" value="${labels[c.cluster_id]||''}" onchange="pick(${c.cluster_id},this.value)"></div>`;
+  }).join('');
+  const g=document.getElementById('grid');g.innerHTML=html;
+  for(const card of g.children)io.observe(card);
+}
+// ===== Cluster detail: all member signs in one overview =====
+const TOOL="tool/?", ABS="https://signcollect.nl/annotation-tool/clusters/";
+let mio=null;
+function openCluster(cid){
+  const c=clusters.find(x=>x.cluster_id===cid);if(!c)return;
+  const top=cleanTop(c.top10);
+  const pred=top.length?top[0][0]:'(geen)';
+  document.getElementById('modalTitle').textContent=`#${cid} — ${pred}`;
+  document.getElementById('modalSub').innerHTML=`<span class=badge>${c.size} gebaren</span>${catChip(c.categories)}  klik een gebaar om het in de editor te openen`;
+  const mg=document.getElementById('modalGrid');
+  mg.innerHTML=c.members.map(sid=>{
+    const s=segById[sid];if(!s)return '';
+    const dl=TOOL+'video='+encodeURIComponent(ABS+'vid/'+s.video+'.mp4')+'&eaf='+encodeURIComponent(ABS+'out/eaf/'+s.video+'.eaf')+'&t='+ (s.start_sec||0);
+    return `<div class=mc>
+      <div class=vid data-clip="${s.clip}" onclick="window.open('${dl}','_blank')" title="open in editor"></div>
+      <small>${s.video} @${(s.start_sec||0).toFixed(1)}s${s.low_conf?' ⚠':''}</small></div>`;
+  }).join('');
+  if(mio)mio.disconnect();
+  mio=newVideoObserver(mg);
+  for(const card of mg.children)if(card.classList&&card.classList.contains('mc'))mio.observe(card);
+  document.getElementById('modal').classList.add('open');
+  mg.scrollTop=0;
+}
+function closeCluster(){
+  document.getElementById('modal').classList.remove('open');
+  if(mio){mio.disconnect();mio=null;}
+  document.getElementById('modalGrid').innerHTML='';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCluster();});
+function pick(cid,g){labels[cid]=g;document.getElementById('stat').textContent=`${Object.keys(labels).length} labeled`;}
+document.getElementById('save').onclick=()=>{
+  const blob=new Blob([JSON.stringify(labels,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cluster_labels.json';a.click();
+};
+['sort','cat','novelOnly','lowOnly','q'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{page=0;render();}));
+boot();
+</script>
