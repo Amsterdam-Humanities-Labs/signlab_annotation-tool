@@ -29,3 +29,24 @@ clusters/out/
 /v2/vendor/ffmpeg/esm/ffmpeg-core.wasm
 /v3/vendor/ffmpeg/esm/ffmpeg-core.wasm
 /v1/vendor/ffmpeg/esm/ffmpeg-core.wasm
+
+# --- logs, backups, caches and generated data (added 2026-08-26 cleanup) ---
+*.log
+*.bak
+*.bak.*
+*.bak-*
+*.bak_*
+*.backup
+*.backup.*
+*.backup_*
+*_backup_*
+*.orig
+*.old
+*.outdated
+*.tmp
+__pycache__/
+*.pyc
+.claude/
+.mcp.json
+.playwright-mcp/
+.superpowers/
