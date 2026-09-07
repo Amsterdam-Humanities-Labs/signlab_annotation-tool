@@ -54,8 +54,10 @@ keeps working:
 
 - **Smart search** (handshape recognition) — posts a frame to `signcollect.nl`.
 - **Signbank video preview** — previews gloss videos from Signbank/Signcollect.
-- **Gloss glossary search** — works fully offline (the gloss data is bundled in
-  `glosses_transformed.json`).
+- **Gloss glossary search** — reads `/glosses_transformed.json` from the docroot
+  root of whichever site serves the tool. That file is the Signbank export the
+  connector in menu_beta rebuilds; the tool used to carry its own 11 MB copy,
+  which meant six copies that nothing ever refreshed.
 - **Auto-segmentation** (V-JEPA 2) — on a fresh video drop, the segmenter fills the
   timeline with detected sign segments. Reaches `https://signcollect.nl/sign-segmenter/`.
 - **Gloss spotting** (SignRep) — when a segment is created, the tool uploads the
@@ -101,7 +103,6 @@ Serve the whole directory as-is. The app needs these next to `index.html`:
 |------|---------|
 | `index.html` | The entire application (HTML + CSS + JS in one file). |
 | `mod.js` | WebCodecs MP4 frame decoder (ES module imported by `index.html`). |
-| `glosses_transformed.json` | Bundled gloss glossary (~11 MB) for offline gloss search. |
 | `temp/` | Suggested default working folder for autosaved `.eaf` files. |
 | `docs/` | Design spec and implementation plan (not required at runtime). |
 

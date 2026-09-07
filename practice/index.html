@@ -356,7 +356,9 @@
     async function boot() {
       try {
         const [entries, vocabRes] = await Promise.all([
-          fetch('glosses_transformed.json').then(r => r.json()),
+          fetch('/signbank_data/glosses_transformed.json')
+            .then(r => r.ok ? r : fetch('/glosses_transformed.json'))
+            .then(r => r.json()),
           fetch(INFER_BASE + '/vocab').then(r => { if (!r.ok) throw new Error('vocab ' + r.status); return r.json(); }),
         ]);
         // glosses_transformed.json is an array of { "<id>": {fields} } wrappers;
