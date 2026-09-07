@@ -3523,7 +3523,8 @@ let bewegingOptions = [
       
     }
   
-    fetch('glosses_transformed.json')
+    fetch('/signbank_data/glosses_transformed.json')
+      .then(r => r.ok ? r : fetch('/glosses_transformed.json'))
       .then(res => res.json())
       .then(data => {
         glosses = data.map(item => {
