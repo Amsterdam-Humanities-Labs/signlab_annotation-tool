@@ -2,9 +2,12 @@
 # Daily backup of annotation-tool EAF files (predictions + human corrections)
 # to the studioFiles (fuseblk) store. Plain dated full copies; 30-day retention.
 set -euo pipefail
-SRC_OUT=/web/annotation-tool/clusters/out/eaf
-SRC_EDIT=/web/annotation-tool/clusters/edit/eaf
-DEST=/web/gebarenoverleg_media/studioFiles/annotation-tool/segments
+# Install root. Same resolution the PHP side does, minus the parts bash
+# has no way to reach: SC_WEB_ROOT from the environment, else /web.
+SC_WEB_ROOT=${SC_WEB_ROOT:-/web}
+SRC_OUT="$SC_WEB_ROOT/annotation-tool/clusters/out/eaf"
+SRC_EDIT="$SC_WEB_ROOT/annotation-tool/clusters/edit/eaf"
+DEST="$SC_WEB_ROOT/gebarenoverleg_media/studioFiles/annotation-tool/segments"
 DAY=$(date +%F)
 SNAP="$DEST/$DAY"
 mkdir -p "$SNAP/out" "$SNAP/edit"
