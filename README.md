@@ -1,85 +1,119 @@
-# Annotation Tool — Standalone Sign-Language Annotation Editor
+# annotation-tool — standalone sign-language annotation editor
 
-A self-contained, browser-only editor for annotating sign-language videos on a
-multi-tier timeline and saving the result as an ELAN **EAF** file. No server, no
-database, no login — you drop in a video (and optionally an EAF) and work locally.
+A browser-based multi-tier timeline editor that annotates sign-language video
+and saves the result as an ELAN **EAF** file.
 
-**Live URL:** https://signcollect.nl/annotation-tool/
+**Live URL:** https://signcollect.nl/annotation-tool/ — the root `index.html`
+is a redirect; the current tool is `v3/`.
 
-## Requirements
+## What it does
 
-- **Google Chrome or Microsoft Edge** (desktop). The autosave feature uses the
-  [File System Access API](https://developer.mozilla.org/docs/Web/API/File_System_API),
-  which Firefox and Safari do not support. Everything else works in any modern browser,
-  but without autosave you'd have to export manually.
+You drop in a video (and optionally an existing `.eaf`), lay annotations out on
+a multi-tier timeline, and the tool autosaves `<video-name>.eaf` into a folder
+you pick. There is no login, no database and no per-user state on the server —
+annotations live in local files, written through the browser's File System
+Access API.
 
-## Using the tool
+From v3 on it is not purely local: dropping a video also triggers automatic
+**sign segmentation** (V-JEPA 2) and per-segment **gloss spotting** (SignRep)
+against GPU inference servers, and video conversion to 25 fps happens
+server-side rather than in browser ffmpeg.wasm.
 
-1. **Open** https://signcollect.nl/annotation-tool/
-2. **Drop a video** (`.mp4`) onto the page — or click the file picker. You can drop an
-   **`.eaf`** file at the same time (or on its own) to load existing annotations.
-   - The video is read locally in your browser; it is **not** uploaded anywhere.
-   - Frames are decoded for precise frame-by-frame scrubbing (long videos take longer to load).
-3. **Tiers (timelines).**
-   - Start with one tier (`Tier 1`). Use **+ Tier** to add more.
-   - **Double-click** a tier's name chip to rename it; click **×** to delete it
-     (deleting removes that tier's annotations; at least one tier always remains).
-   - Dropping an `.eaf` replaces the tiers with the ones found in the file — one
-     timeline row per `<TIER>`.
-4. **Annotate.** Add annotation boxes on the timeline, type text, drag to move, drag the
-   edges to resize, and drag vertically to move a box between tiers.
-5. **Autosave (the first save asks for a folder).**
-   - On the first change, the browser asks you to **pick a folder** to save into
-     (suggest the app's `temp/` folder or any working folder you like).
-   - From then on, the tool writes **`<video-name>.eaf`** into that folder roughly
-     1 second after each change. Only the `.eaf` is written — your video stays the
-     original file you dropped.
-   - The chosen folder is remembered (via the browser's IndexedDB) so it survives reloads.
-6. **Restore a session.** When you reopen the page, if a saved `.eaf` exists in the
-   remembered folder you'll be asked whether to **restore** it. The video must be
-   re-dropped — unless it sits in that same folder with a matching name, in which case
-   it is reloaded automatically.
+The repo carries several variants, each its own directory with its own README:
 
-## Optional online features
+| directory | what it is |
+|---|---|
+| `v3/` | the current editor — server-side conversion, auto-segmentation, auto-spotting. **This is what the root URL serves.** |
+| `v2/`, `v1/` | previous iterations, kept live so old links keep working. v1/v2 do conversion in-browser with bundled ffmpeg.wasm. |
+| `webcam/` | v3 with a webcam recording as the entry point instead of a file drop |
+| `practice/` | not an editor: an NGT practice app that shows a sign, records your attempt, and scores it with the spotter. Has a small node test suite (`practice-core.test.mjs`). |
+| `clusters/` | a review UI over pre-computed hand-cluster segmentations, plus its own copy of the v3 tool under `clusters/tool/` |
+| `docs/` | design specs, implementation plans, and the LaTeX sources for two papers |
 
-These only work when the page is online and reachable from `signcollect.nl` (which it is,
-when served from the live URL). If offline, they fail quietly and the rest of the tool
-keeps working:
+## Where it runs
 
-- **Smart search** (handshape recognition) — posts a frame to `signcollect.nl`.
-- **Signbank video preview** — previews gloss videos from Signbank/Signcollect.
-- **Gloss glossary search** — reads `/glosses_transformed.json` from the docroot
-  root of whichever site serves the tool. That file is the Signbank export the
-  connector in menu_beta rebuilds; the tool used to carry its own 11 MB copy,
-  which meant six copies that nothing ever refreshed.
+The **signcollect core server** (production VPS), at
+`https://signcollect.nl/annotation-tool/`, from `<root>/annotation-tool`. The
+demo hosts deploy the same tree: dev2 under `/web`, dev-1 under
+`/srv/signcollect/web`.
 
-## Files in this directory (deployment)
+The editor itself needs no server beyond a static one — it must be served over
+HTTP/HTTPS, because the File System Access API and the ES-module import of
+`mod.js` do not work from a `file://` URL. Chrome or Edge on the desktop:
+Firefox and Safari have no File System Access API, so autosave is unavailable
+there.
 
-Serve the whole directory as-is. The app needs these next to `index.html`:
+**One correction to the "browser-only" description:** `clusters/edit/io.php`
+and `clusters/edit/merge_io.php` are small PHP endpoints that persist cluster
+review decisions to `clusters/edit/status.json` and corrected EAFs to
+`clusters/edit/eaf/`. They need PHP and a web-writable `clusters/edit/`. They
+are the only server-side code in the repo, and the editor does not use them.
 
-| File | Purpose |
-|------|---------|
-| `index.html` | The entire application (HTML + CSS + JS in one file). |
-| `mod.js` | WebCodecs MP4 frame decoder (ES module imported by `index.html`). |
-| `temp/` | Suggested default working folder for autosaved `.eaf` files. |
-| `docs/` | Design spec and implementation plan (not required at runtime). |
+## Status
 
-No build step is required — it is plain static files. Just make sure the directory is
-served over **HTTP/HTTPS** (the File System Access API and the ES-module import do not
-work from a `file://` URL).
+**Production.**
 
-## Local preview
+## How to deploy it
+
+No build step. Everything is static files plus two small PHP endpoints; the
+ffmpeg.wasm builds under `v1/vendor/`, `v2/vendor/` and `v3/vendor/` are
+committed, not fetched.
+
+Deployment is by `interface_deploy/scripts/repos.tsv` in
+`signlab_signcollect-stack`, which maps `annotation-tool` → this repo on branch
+`main`. `scripts/install.sh` runs `host-bootstrap.sh`, which clones (or fetches
+and hard-resets) the repo into `<root>/annotation-tool`. On a demo host
+`rewrite-urls.sh` then repoints hardcoded `signcollect.nl` URLs at the demo's
+hostname.
+
+To preview locally, serve the directory over HTTP:
 
 ```bash
-cd annotation-tool
-python3 -m http.server 8799
-# then open http://localhost:8799/ in Chrome or Edge
+python3 -m http.server 8799   # then open http://localhost:8799/ in Chrome or Edge
 ```
+
+## Configuration
+
+None. There is no config file, no credentials and no `.env` — which is why this
+repo needs nothing from `signcollect-lib`. `clusters/edit/` needs to be
+writable by the web user if the cluster review UI is used; nothing else on the
+host has to be prepared.
+
+## Dependencies
+
+All of these are optional at the level of "the editor still opens without
+them", but the AI features and the previews go dark:
+
+| service | used for |
+|---|---|
+| `/sign-segmenter` (upload, convert, segment) | server-side ffmpeg conversion and V-JEPA 2 auto-segmentation. Warm GPU inference server. |
+| `/sign-spotter` | SignRep gloss spotting per segment, and the practice app's scoring |
+| `/getHandshapes.php` | handshape "smart search" |
+| `/zin/getGlossVideo.php` (`signlab_zin`) | Signbank gloss video preview |
+| `/glosses_transformed.json` | the gloss glossary, read from the docroot root of whichever site serves the tool. Produced by the Signbank connector in `signlab_signCollect-v2`; the tool used to carry its own 11 MB copy, which meant six copies that nothing ever refreshed. |
+| `/gebarenoverleg_media/studioFilesMini/raw/` | studio video the cluster review UI plays |
+| Signbank (`https://signbank.cls.ru.nl`) | gloss dictionary links |
+
+The inference services are reached by path on the same origin
+(`/sign-segmenter`, `/sign-spotter`), so Apache reverse-proxies them to the GPU
+box. Those proxy rules live on the production core server only: the deploy repo
+declares them explicitly out of scope, alongside Signbank, ISS_Server and
+handshape_search, so on a demo host the AI features and handshape search have
+no backend and fail quietly.
+
+*TODO: confirm where the segmenter/spotter proxy configuration and the services
+themselves are defined — they are not in this repo and not in
+`signlab_signcollect-stack`.*
 
 ## EAF format notes
 
 - **Loading:** reads `TIME_ORDER`/`TIME_SLOT` times and each `<TIER>`'s
-  `ALIGNABLE_ANNOTATION`s. Tiers with no time-aligned annotations load as empty tiers.
-- **Saving:** generates ELAN **EAF 3.0** XML with a `MEDIA_DESCRIPTOR` pointing at the
-  video filename, deduplicated time slots, and one `<TIER>` per timeline. The output
-  re-opens cleanly in ELAN and round-trips back into this tool.
+  `ALIGNABLE_ANNOTATION`s. Tiers with no time-aligned annotations load as empty
+  tiers.
+- **Saving:** generates ELAN **EAF 3.0** XML with a `MEDIA_DESCRIPTOR` pointing
+  at the video filename, deduplicated time slots, and one `<TIER>` per
+  timeline. The output re-opens cleanly in ELAN and round-trips back into this
+  tool.
+
+For the full user guide — tiers, autosave, session restore, the inference
+pipeline — see `v3/README.md`.
