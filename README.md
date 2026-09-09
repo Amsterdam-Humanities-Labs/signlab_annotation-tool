@@ -55,9 +55,7 @@ are the only server-side code in the repo, and the editor does not use them.
 
 ## How to deploy it
 
-No build step. Everything is static files plus two small PHP endpoints; the
-ffmpeg.wasm builds under `v1/vendor/`, `v2/vendor/` and `v3/vendor/` are
-committed, not fetched.
+No build step. Everything is static files plus two small PHP endpoints.
 
 Deployment is by `interface_deploy/scripts/repos.tsv` in
 `signlab_signcollect-stack`, which maps `annotation-tool` → this repo on branch
@@ -66,9 +64,36 @@ and hard-resets) the repo into `<root>/annotation-tool`. On a demo host
 `rewrite-urls.sh` then repoints hardcoded `signcollect.nl` URLs at the demo's
 hostname.
 
-To preview locally, serve the directory over HTTP:
+### The one file a clone does not give you
+
+`vendor/ffmpeg/esm/ffmpeg-core.wasm` — 32,129,114 bytes of `@ffmpeg/core`
+0.12.6 — is **not in this repository**, and each of the five editors
+(`v1/`, `v2/`, `v3/`, `webcam/`, `clusters/tool/`) loads its own copy of it by
+a relative URL. Four identical copies used to be committed: 128 MB that every
+clone of this repo paid for. `.gitignore` has named all five paths since the
+file was introduced.
+
+The deploy supplies it. `interface_deploy/scripts/fetch-ffmpeg-core.sh`
+downloads the pinned release, refuses anything that does not hash to
+`2390efa7fb66e7e42dbae15427571a5ffc96b829480904c30f471f0a78967f61`, caches it
+outside the docroot and copies it into all five directories; the deploy's
+`git clean` spares `vendor/`, so it survives every redeploy. The stack's
+`scripts/verify.sh` asserts all five are served at the right length, because a
+missing core does not break the page — it breaks the first conversion, later,
+silently.
+
+To preview locally, fetch it once and serve the directory over HTTP:
 
 ```bash
+for d in v1 v2 v3 webcam clusters/tool; do
+  mkdir -p "$d/vendor/ffmpeg/esm"
+  curl -fL https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm \
+       -o "$d/vendor/ffmpeg/esm/ffmpeg-core.wasm"
+done
+# clusters/tool/ has no vendor/ loaders in git either — take v3's:
+cp v3/vendor/ffmpeg/{ffmpeg.js,util.js,814.ffmpeg.js} clusters/tool/vendor/ffmpeg/
+cp v3/vendor/ffmpeg/esm/ffmpeg-core.js clusters/tool/vendor/ffmpeg/esm/
+
 python3 -m http.server 8799   # then open http://localhost:8799/ in Chrome or Edge
 ```
 
