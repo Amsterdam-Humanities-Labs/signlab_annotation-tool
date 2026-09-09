@@ -20,10 +20,15 @@ logs/
 .DS_Store
 Thumbs.db
 
-# --- large assets excluded from git (GitHub rejects >100MB) ---
+# --- large assets excluded from git ---
 clusters/vid/
 clusters/clips/
 clusters/out/
+# ffmpeg.wasm's core: 32MB, once per editor, five editors. The deploy puts a
+# hash-verified copy in each of these paths - see "The one file a clone does
+# not give you" in README.md. Listed individually although `vendor/` above
+# already covers them, because these five are the ones something breaks
+# without.
 /clusters/tool/vendor/ffmpeg/esm/ffmpeg-core.wasm
 /webcam/vendor/ffmpeg/esm/ffmpeg-core.wasm
 /v2/vendor/ffmpeg/esm/ffmpeg-core.wasm
