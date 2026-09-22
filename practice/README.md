@@ -1,106 +1,61 @@
-# Annotation Tool — SignRep Practice Variant
+# Annotation tool, practice app
+An NGT practice app. It shows a random sign, you repeat it on your webcam, and the gloss spotter (SignRep) scores you.
 
-An interactive NGT (Sign Language of the Netherlands) **practice** app. It shows
-you a random sign, you repeat it on webcam in a guided **4-second capture**, and
-the SignRep spotter scores your attempt — advancing when your sign lands in the
-**top-3**, and revealing the answer after 3 misses. Built on the v3 pipeline
-(server-side ffmpeg conversion + V-JEPA 2 segmentation + SignRep spotting); see
-`../v3/README.md` for the shared inference infrastructure.
+Live: https://signcollect.nl/annotation-tool/practice/
 
-This is **not** an annotation editor — there is no timeline editing, no tiers, no
-EAF. It reuses only the webcam capture and the two inference clients.
-
-**Live URL:** https://signcollect.nl/annotation-tool/practice/
+It is not an annotation editor. It has no timeline editing, no tiers and no EAF. It reuses the webcam recording and the two inference clients from v3. See `../v3/README.md` for the servers.
 
 ## Requirements
-
-- **Google Chrome or Microsoft Edge** (desktop), over **HTTPS** — needs
-  `getUserMedia` (webcam) and the `data-state` / `:has()` styling these browsers
-  support. A webcam is required.
-- The inference servers must be reachable (see *Backend dependency*). The app is
-  **online-only**: with no servers there is nothing to practise against.
+- Chrome or Edge on a desktop, over HTTPS, with a webcam. The app needs `getUserMedia` and the `:has()` CSS selector.
+- The segmenter and spotter must be reachable. Without them the app cannot work.
 
 ## How it works
+1. On load the app reads `/signbank_data/glosses_transformed.json` and the spotter's `GET /vocab`. It picks targets only from signs that the spotter knows and that have a Signbank video. So every target can be shown and can be scored. If `/vocab` does not answer, the app shows an error and does not start.
+2. Watch: a random target sign plays in a loop on the left, with its gloss.
+3. Start: after "Ready?" and "Sign!" the webcam records exactly 4 seconds while a countdown runs.
+4. Analyse: the clip is uploaded, converted to 25 fps and segmented. The spotter returns the 10 most likely NGT glosses for the longest segment.
+5. Result: the segments appear on the timeline and the glosses are listed. The target turns green if it is in the top 3, or if the spotter gives it a score above 0.7 (`SCORE_PASS`).
+   - Match: your streak goes up by one and the next sign starts.
+   - Miss: click **Retry**. After 3 attempts the sign plays in slow motion and the next sign starts.
+6. **Skip** moves to the next sign. **Stop** cancels an attempt. A scoreboard shows your streak and matched/total.
 
-1. **Open** the app. On load it fetches `/signbank_data/glosses_transformed.json` and the spotter's
-   `GET /vocab`, then builds the **target pool** = signs the spotter knows **∩**
-   signs that have a Signbank demo video. Every target is therefore both
-   *demonstrable* and *achievable*. If `/vocab` is unreachable the app shows a
-   fatal banner and does not start (this is intentional — it refuses to serve
-   unwinnable targets).
-2. **Watch** — a random target sign loops in the left panel with its gloss label.
-3. **Start** — a brief "Ready?…", then "**Sign!**" with a **4 → 0** countdown
-   while your webcam records exactly 4 seconds (a cursor sweeps the timeline).
-4. **Analyse** — the clip is uploaded, converted (25 fps), segmented, and the
-   longest detected segment is spotted for its **top-10 NGT glosses**.
-5. **Result** — detected segments animate onto the timeline; the spotted glosses
-   are listed; your target turns **green if it is in the top-3**.
-   - **Match** → streak +1, advance to the next sign.
-   - **Miss** → **Retry**. After **3 attempts** the reference replays in slow
-     motion ("reveal") and the app advances.
-6. **Skip** any sign; **Stop** aborts an in-flight attempt. A scoreboard tracks
-   your streak and matched/total counts.
+The preview is mirrored so it feels natural. The recording is not mirrored, because the spotter needs the real orientation.
 
-The webcam preview is **mirrored for comfort**, but the recorded stream is
-**un-mirrored** — the spotter needs an un-mirrored sign.
+Scoring happens after the recording, not during it. Only the cursor and the countdown move in real time.
 
-> **On "live":** inference is batch (upload a clip → get segments/glosses), so the
-> timeline cannot update mid-sign. "Live" here means the recording cursor sweeps
-> in real time during capture and detected segments animate in at the result.
-
-## Inference pipeline (per attempt)
-
+## Inference per attempt
 ```
-webcam 4s webm
-   └─ POST → /sign-segmenter/upload  ──> {videoId}  (native ffmpeg → 25 fps mp4)
-        ├─ POST {videoId} → /sign-segmenter/segment ──> [[start,end], …]
-        │       └─ longest segment = the sign  (fallback: centred 2 s window)
-        └─ GET /sign-segmenter/video/{videoId} ──> 25 fps mp4
-                └─ POST → /sign-spotter/upload ──> {videoId}
-                     └─ POST {videoId,start,end,topk:10} → /sign-spotter/spot ──> top-10 glosses
-                          └─ target ∈ top-3 ?  →  match / miss
+webcam 4 s webm
+  +- POST /sign-segmenter/upload --> {videoId}  (ffmpeg on the server, 25 fps mp4)
+       +- POST {videoId} /sign-segmenter/segment --> [[start,end], ...]
+       |     +- longest segment is the sign (fallback: a 2 s window in the middle)
+       +- GET /sign-segmenter/video/{videoId} --> 25 fps mp4
+             +- POST /sign-spotter/upload --> {videoId}
+                  +- POST {videoId,start,end,topk:10} /sign-spotter/spot --> top 10 glosses
+                       +- target in top 3 or score > 0.7?  match : miss
 ```
+Both servers run on the GPU machine (monsterfish) behind the Apache proxies `/sign-segmenter/` and `/sign-spotter/`. On `localhost` the app uses the dev servers on ports `8001` (segmenter) and `8000` (spotter).
 
-- **Segmenter** (`vjepa-sign-segmentation`): V-JEPA 2 + `ensemble50`, 50 fps.
-- **Spotter** (`signrep-spotter`): SignRep embeddings, 25 fps-tuned.
-- Both run warm on the GPU box (monsterfish) behind the Apache reverse-proxies
-  `/sign-segmenter/` and `/sign-spotter/`. Localhost dev: `:8001` / `:8000`.
-
-## Backend dependency: spotter `GET /vocab`
-
-The target pool needs the spotter's gloss inventory. The spotter must expose:
-
+## Spotter endpoint `GET /vocab`
+The spotter must return its gloss list:
 ```
-GET /sign-spotter/vocab  →  { "glosses": ["HUIS", "BOOM", …] }
+GET /sign-spotter/vocab  ->  { "glosses": ["HUIS", "BOOM", ...] }
 ```
+These are the same labels that `/spot` ranks. The app compares them after trimming and lowercasing, so the spelling must match `/spot`.
 
-returning the model's class labels (the same inventory `/spot` ranks over). The
-gloss casing/format must match `/spot`'s output so the top-3 comparison (which
-normalizes via trim + lowercase) works. Without this endpoint the app cannot
-start.
-
-## Files in this directory (deployment)
-
-Serve the directory as-is over HTTP/HTTPS. Required next to `index.html`:
+## Files
+Serve the folder over HTTP or HTTPS; `file://` does not work. There is no build step.
 
 | File | Purpose |
-|------|---------|
-| `index.html` | The entire app (HTML + CSS + JS, one file). |
-| `practice-core.js` | Pure logic (target pool, top-3 match, segment pick, attempts) — ES module, unit-tested. |
-| `practice-core.test.mjs` | `node --test` unit tests for `practice-core.js`. |
+|---|---|
+| `index.html` | The whole app (HTML, CSS and JS) |
+| `practice-core.js` | Pure logic: target list, match rule, segment choice, attempts. Has unit tests. |
+| `practice-core.test.mjs` | Unit tests for `practice-core.js` |
 
-No build step. ES-module imports and `getUserMedia` require **HTTP/HTTPS** (not
-`file://`).
-
-## Local preview & tests
-
+## Tests and local preview
 ```bash
-cd annotation-tool/practice
-node --test                 # run the pure-logic unit tests
-python3 -m http.server 8799 # then open http://localhost:8799/ in Chrome/Edge
+cd practice
+node --test                   # unit tests
+python3 -m http.server 8799   # open http://localhost:8799/ in Chrome or Edge
 ```
-
-For local end-to-end use, point the spotter/segmenter dev servers at
-`localhost:8000` / `localhost:8001` (the app auto-switches to these on
-`localhost`), or run against the production proxies by serving from a non-local
-host.
+On `localhost` the app uses dev servers on ports 8000 and 8001. To use the production servers instead, serve it from a host that is not `localhost`.
