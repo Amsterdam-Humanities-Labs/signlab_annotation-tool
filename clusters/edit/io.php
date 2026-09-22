@@ -3,12 +3,9 @@
 // GET            -> returns status.json ({ "<video>": {"status": "...", "ts": <unix>}, ... })
 // GET ?eaf=<video> -> the corrected EAF for <video>, 404 if there is none
 // POST {video, status?, eaf?} -> updates status.json and/or writes eaf/<video>.eaf
+// POST needs a logged-in session; same-origin only (no CORS).
 // Data lives outside the checkout - see data.php.
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
 require_once __DIR__ . '/data.php';
 
@@ -37,6 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  ann_require_session();
   $body = json_decode(file_get_contents('php://input'), true);
   if (!is_array($body)) { http_response_code(400); echo json_encode(array('error'=>'bad json')); exit; }
   $video = safe_name(isset($body['video']) ? $body['video'] : '');

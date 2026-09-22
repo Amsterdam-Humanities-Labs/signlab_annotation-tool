@@ -30,7 +30,7 @@ Cron: `clusters/backup_eaf.sh` daily, snapshots EAFs + review data to `gebarenov
 
 ## Configuration
 - No credentials. `sc_paths.php` is the vendored signcollect-lib resolver (keep byte-identical).
-- `<webroot>/annotation_data/clusters/` (outside the checkout, writable by www-data): `status.json`, `merge_decisions.json`, `eaf/*.eaf` written by `clusters/edit/io.php` and `merge_io.php`. Seeded from `clusters/edit/seed/` on first use.
+- `<webroot>/annotation_data/clusters/` (outside the checkout, writable by www-data): `status.json`, `merge_decisions.json`, `eaf/*.eaf` written by `clusters/edit/io.php` and `merge_io.php`. Seeded from `clusters/edit/seed/` on first use. POSTs need a portal login (signCollect-v2's `menu_beta/php_api/session.php`); same-origin only.
 - `clusters/out/`, `clusters/vid/`, `clusters/clips/` are gitignored pipeline output.
 
 ## Dependencies
