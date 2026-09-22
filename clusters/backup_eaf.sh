@@ -6,13 +6,18 @@ set -euo pipefail
 # has no way to reach: SC_WEB_ROOT from the environment, else /web.
 SC_WEB_ROOT=${SC_WEB_ROOT:-/web}
 SRC_OUT="$SC_WEB_ROOT/annotation-tool/clusters/out/eaf"
-SRC_EDIT="$SC_WEB_ROOT/annotation-tool/clusters/edit/eaf"
+# Human corrections live outside the checkout (see edit/data.php).
+SRC_DATA="$SC_WEB_ROOT/annotation_data/clusters"
+SRC_EDIT="$SRC_DATA/eaf"
 DEST="$SC_WEB_ROOT/gebarenoverleg_media/studioFiles/annotation-tool/segments"
 DAY=$(date +%F)
 SNAP="$DEST/$DAY"
 mkdir -p "$SNAP/out" "$SNAP/edit"
 rsync -rt --delete "$SRC_OUT/"  "$SNAP/out/"
-rsync -rt --delete "$SRC_EDIT/" "$SNAP/edit/"
+if [ -d "$SRC_EDIT" ]; then rsync -rt --delete "$SRC_EDIT/" "$SNAP/edit/"; fi
+for f in status.json merge_decisions.json; do
+  if [ -f "$SRC_DATA/$f" ]; then cp -p "$SRC_DATA/$f" "$SNAP/$f"; fi
+done
 # write a manifest + pointer (no symlinks on fuseblk)
 echo "$DAY" > "$DEST/LATEST.txt"
 printf '%s backup: out=%s edit=%s -> %s\n' "$(date '+%F %T')" \
