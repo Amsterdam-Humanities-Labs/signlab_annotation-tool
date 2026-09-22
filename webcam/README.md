@@ -66,8 +66,8 @@ keeps working:
 
 - **Smart search** (handshape recognition) — posts a frame to `signcollect.nl`.
 - **Signbank video preview** — previews gloss videos from Signbank/Signcollect.
-- **Gloss glossary search** — works fully offline (the gloss data is bundled in
-  `glosses_transformed.json`).
+- **Gloss glossary search** — reads `/signbank_data/glosses_transformed.json`
+  (falls back to `/glosses_transformed.json`) from the serving site.
 - **Gloss spotting** (SignRep) — when a segment is created, the tool uploads the
   video once and asks the inference server for the **top-10 NGT glosses** for that
   segment, shown in a dropdown under the box (click to fill the annotation; ↻ to
@@ -84,9 +84,7 @@ Serve the whole directory as-is. The app needs these next to `index.html`:
 |------|---------|
 | `index.html` | The entire application (HTML + CSS + JS in one file). |
 | `mod.js` | WebCodecs MP4 frame decoder (ES module imported by `index.html`). |
-| `glosses_transformed.json` | Bundled gloss glossary (~11 MB) for offline gloss search. |
 | `temp/` | Suggested default working folder for autosaved `.eaf` files. |
-| `docs/` | Design spec and implementation plan (not required at runtime). |
 
 No build step is required — it is plain static files. Just make sure the directory is
 served over **HTTP/HTTPS** (the File System Access API and the ES-module import do not
