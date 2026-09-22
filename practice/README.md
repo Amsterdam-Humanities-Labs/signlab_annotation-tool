@@ -22,7 +22,7 @@ EAF. It reuses only the webcam capture and the two inference clients.
 
 ## How it works
 
-1. **Open** the app. On load it fetches the bundled gloss data and the spotter's
+1. **Open** the app. On load it fetches `/signbank_data/glosses_transformed.json` and the spotter's
    `GET /vocab`, then builds the **target pool** = signs the spotter knows **∩**
    signs that have a Signbank demo video. Every target is therefore both
    *demonstrable* and *achievable*. If `/vocab` is unreachable the app shows a
@@ -88,7 +88,6 @@ Serve the directory as-is over HTTP/HTTPS. Required next to `index.html`:
 | `index.html` | The entire app (HTML + CSS + JS, one file). |
 | `practice-core.js` | Pure logic (target pool, top-3 match, segment pick, attempts) — ES module, unit-tested. |
 | `practice-core.test.mjs` | `node --test` unit tests for `practice-core.js`. |
-| `glosses_transformed.json` | Bundled gloss glossary (~11 MB) for gloss→Signbank-video lookup. |
 
 No build step. ES-module imports and `getUserMedia` require **HTTP/HTTPS** (not
 `file://`).
