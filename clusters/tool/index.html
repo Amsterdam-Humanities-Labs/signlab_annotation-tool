@@ -3851,10 +3851,11 @@ document.addEventListener('mousedown', function(e) {
       try {
         const files = [];
         if (eafUrl) {
-          // Prefer a previously-saved corrected EAF (edit/eaf/) over the freshly-emitted one (out/eaf/).
+          // Prefer a previously-saved corrected EAF (served by edit/io.php) over the freshly-emitted one (out/eaf/).
           let useEaf = eafUrl;
           try {
-            const corr = eafUrl.replace('/clusters/out/eaf/', '/clusters/edit/eaf/');
+            const m = eafUrl.match(/\/clusters\/out\/eaf\/([^/?#]+)\.eaf(?:[?#]|$)/);
+            const corr = m ? '../edit/io.php?eaf=' + encodeURIComponent(decodeURIComponent(m[1])) : eafUrl;
             if (corr !== eafUrl) {
               const cr = await fetch(corr, { cache: 'no-store' });
               if (cr.ok) useEaf = corr;

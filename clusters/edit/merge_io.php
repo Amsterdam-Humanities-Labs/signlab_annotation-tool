@@ -2,13 +2,14 @@
 // Merge-review persistence endpoint.
 // GET                     -> returns merge_decisions.json ({ "<a>_<b>": {"decision":"merge|keep","ts":...}, ... })
 // POST {a, b, decision}   -> records one pair decision
+// Data lives outside the checkout - see data.php.
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
-$DEC = __DIR__ . '/merge_decisions.json';
+require_once __DIR__ . '/data.php';
 
 function read_dec($f) {
   if (!file_exists($f)) return array();
@@ -17,7 +18,7 @@ function read_dec($f) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-  echo json_encode(read_dec($DEC));
+  echo json_encode(read_dec(ann_read_path('merge_decisions.json')));
   exit;
 }
 
@@ -30,6 +31,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if ($a === -999999 || $b === -999999 || ($d !== 'merge' && $d !== 'keep')) {
     http_response_code(400); echo json_encode(array('error'=>'bad pair')); exit;
   }
+  $DIR = ann_data_ready();
+  if ($DIR === '') ann_fail_unwritable();
+  $DEC = $DIR . '/merge_decisions.json';
   $st = read_dec($DEC);
   $st[$a . '_' . $b] = array('decision' => $d, 'ts' => time());
   $tmp = $DEC . '.tmp';
