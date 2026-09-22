@@ -49,7 +49,7 @@ document.getElementById('stsel').addEventListener('change',e=>{sts=e.target.valu
 document.getElementById('fsonly').addEventListener('change',e=>{fsonly=e.target.checked;draw();});
 Promise.all([
   fetch("out/videos.json").then(r=>r.json()),
-  fetch("edit/status.json").then(r=>r.ok?r.json():{}).catch(()=>({})),
+  fetch("edit/io.php").then(r=>r.ok?r.json():{}).catch(()=>({})),
   fetch("out/finetune_set.json").then(r=>r.ok?r.json():[]).catch(()=>[])
 ]).then(([d,st,fs])=>{
   rows=d; fset=new Set(fs);
