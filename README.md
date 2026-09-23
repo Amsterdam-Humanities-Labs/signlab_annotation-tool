@@ -5,8 +5,8 @@ A browser editor for annotating NGT video on a timeline with several tiers. It s
 | Folder | Contents |
 |---|---|
 | `v3/` | The editor. Drop a video (and optionally an `.eaf`), annotate, and it autosaves `<video>.eaf` to a local folder. Adds automatic segmentation (V-JEPA 2) and gloss spotting (SignRep). User guide: `v3/README.md`. |
-| `webcam/` | A copy of v3 that starts from a webcam recording. See `webcam/README.md`. |
-| `clusters/` | Review pages for pre-computed cluster segmentations: `index.html` (clusters), `merge.html` (merge review), `segview.html`, `videos.html`. `clusters/tool/` is a copy of v3 that opens from a link and autosaves to `clusters/edit/io.php`. |
+| `webcam/` | Redirect to `v3/?mode=webcam` (the editor, starting from a webcam recording). |
+| `clusters/` | Review pages for pre-computed cluster segmentations: `index.html` (clusters), `merge.html` (merge review), `segview.html`, `videos.html`. `clusters/tool/` redirects to `v3/?mode=clusters`, which opens from a link and autosaves to `clusters/edit/io.php`. |
 | `practice/` | An NGT practice app. The gloss spotter scores your sign. See `practice/README.md`. |
 | `docs/` | Design specs and paper sources. |
 

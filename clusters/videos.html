@@ -32,7 +32,7 @@ function draw(){
   view.sort((a,b)=>(a[key]>b[key]?1:-1)*dir);
   document.getElementById('tb').innerHTML=view.map(r=>{
    const eaf=ABS+r.eaf;
-   const tool=`tool/?video=${encodeURIComponent(r.video_url)}&eaf=${encodeURIComponent(eaf)}`;
+   const tool=`../v3/?mode=clusters&video=${encodeURIComponent(r.video_url)}&eaf=${encodeURIComponent(eaf)}`;
    const cls=r._status==='klaar'?'klaar':'nietklaar';
    return `<tr><td>${r.video}</td><td>${r.category||''}</td><td class="${cls}">${r._status}</td><td>${r.n_segments}</td>
     <td style="${color(r.conf_min)}">${r.conf_min.toFixed(2)}</td>
