@@ -51,7 +51,7 @@ Serve the whole folder over HTTP or HTTPS. `file://` does not work for the File 
 | File | Purpose |
 |---|---|
 | `index.html` | The whole app (HTML, CSS and JS) |
-| `mod.js` | WebCodecs MP4 frame decoder, imported by `index.html` |
+| `video-frames.js` | WebCodecs MP4 frame decoder, imported by `index.html` |
 | `temp/` | Suggested folder for autosaved `.eaf` files |
 
 Local preview, from the repo root:
