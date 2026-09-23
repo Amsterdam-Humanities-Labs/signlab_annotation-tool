@@ -43,8 +43,8 @@ A daily cron job runs `clusters/backup_eaf.sh`. It copies the EAFs and review da
 |---|---|
 | Video conversion, automatic segmentation | `https://signcollect.nl/sign-segmenter` (hardcoded) |
 | Gloss spotting, practice scores | `https://signcollect.nl/sign-spotter` (hardcoded) |
-| Handshape search | `/zin/getHandshapes.php` on the same host ([signlab_zin](https://github.com/Amsterdam-Humanities-Labs/signlab_zin)) |
-| Gloss video | `https://signcollect.nl/zin/getGlossVideo.php` (hardcoded, signlab_zin) |
+| Handshape search | `/zin/getHandshapes.php` on the same host ([signlab_zinnen-annotation](https://github.com/Amsterdam-Humanities-Labs/signlab_zinnen-annotation)) |
+| Gloss video | `https://signcollect.nl/zin/getGlossVideo.php` (hardcoded, signlab_zinnen-annotation) |
 | Gloss list | `/signbank_data/glosses_transformed.json`, or `/glosses_transformed.json` if that fails |
 | Cluster video | URLs in `clusters/out/videos.json` (studio media) |
 
