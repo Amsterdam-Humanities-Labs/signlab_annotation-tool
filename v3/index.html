@@ -3,6 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <title>Improved Subtitle Editor Demo with Canvas</title>
+  <script>
+    // One editor, three modes: /v3/ (default), ?mode=webcam (was webcam/), ?mode=clusters (was clusters/tool/).
+    (function () {
+      const m = new URLSearchParams(location.search).get('mode');
+      document.documentElement.dataset.mode = (m === 'webcam' || m === 'clusters') ? m : '';
+      if (document.documentElement.dataset.mode === 'webcam') document.title = 'Webcam Sign Capture — Annotation Tool';
+      // clusters: autosave to clusters/edit/io.php needs a login
+      if (document.documentElement.dataset.mode === 'clusters') document.write('<script src="/userProtect.js"><\/script>');
+    })();
+  </script>
+  <style>
+    html:not([data-mode="webcam"]) .only-webcam, html:not([data-mode="clusters"]) .only-clusters,
+    html[data-mode="webcam"] .no-webcam { display: none !important; }
+  </style>
   <style>
     body {
       margin: 0;
@@ -65,6 +79,8 @@
     .spot-spinner { width: 18px; height: 18px; margin: 6px auto; border: 3px solid #cfe2ff;
       border-top-color: #007bff; border-radius: 50%; animation: spot-spin .8s linear infinite; }
     @keyframes spot-spin { to { transform: rotate(360deg); } }
+    .cam-spinner { width: 54px; height: 54px; border: 5px solid rgba(255,255,255,.25);
+      border-top-color: #6faaff; border-radius: 50%; animation: spot-spin .9s linear infinite; }
     .spot-hdr { display: flex; justify-content: space-between; align-items: center;
       padding: 2px 6px; font-weight: bold; color: #333; border-bottom: 1px solid #eee; }
     .spot-list { max-height: 200px; overflow-y: auto; }
@@ -339,11 +355,41 @@
 <div id="dropOverlay" style="position:fixed;inset:0;z-index:9999;background:rgba(20,20,30,.92);
      color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
      text-align:center;font-family:sans-serif;">
+  <div class="no-webcam" style="display:contents">
   <h2>Drop a video (.mp4) and optionally an EAF (.eaf)</h2>
   <p>or pick files:</p>
   <input type="file" id="filePicker" accept=".mp4,video/mp4,.eaf,application/xml" multiple>
   <p id="dropHint" style="margin-top:12px;opacity:.7;font-size:13px;">
     Chrome or Edge required (File System Access API for autosave).</p>
+  </div>
+  <div class="only-webcam" style="display:contents">
+  <h2 id="camTitle">Record a sign from your webcam</h2>
+  <div id="camError" style="display:none;color:#ff9c9c;max-width:560px;margin:6px 0;font-size:14px;"></div>
+  <!-- NOT mirrored: the live preview must match the (un-mirrored) recording, which is
+       also the orientation the models expect (mirroring would swap the signing hand). -->
+  <video id="camPreview" autoplay muted playsinline
+         style="width:480px;max-width:90vw;border-radius:10px;background:#000;"></video>
+  <video id="camRecorded" controls playsinline
+         style="display:none;width:480px;max-width:90vw;border-radius:10px;background:#000;"></video>
+  <div id="camControls" style="margin-top:14px;display:flex;gap:12px;align-items:center;">
+    <button id="camRecordBtn" type="button"
+            style="background:#e53935;color:#fff;border:none;border-radius:6px;padding:9px 20px;font-size:15px;cursor:pointer;">● Record</button>
+    <span id="camTimer" style="font-variant-numeric:tabular-nums;opacity:.85;min-width:46px;text-align:left;">0.0s</span>
+  </div>
+  <div id="camReview" style="display:none;margin-top:14px;gap:12px;align-items:center;">
+    <button id="camUseBtn" type="button"
+            style="background:#43a047;color:#fff;border:none;border-radius:6px;padding:9px 20px;font-size:15px;cursor:pointer;">Use this → segment &amp; spot</button>
+    <button id="camRetakeBtn" type="button"
+            style="background:#555;color:#fff;border:none;border-radius:6px;padding:9px 20px;font-size:15px;cursor:pointer;">Re-record</button>
+  </div>
+  <p style="margin-top:12px;opacity:.7;font-size:13px;max-width:560px;">
+    Your recording is normalized to 25&nbsp;fps, then automatically segmented and spotted. Chrome/Edge recommended.</p>
+  </div>
+</div>
+<div id="camBusy" style="display:none;position:fixed;inset:0;z-index:10100;background:rgba(20,20,30,.97);
+     color:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-family:sans-serif;">
+  <div class="cam-spinner"></div>
+  <p id="camBusyMsg" style="margin-top:18px;font-size:15px;">Processing your recording…</p>
 </div>
 <div id="convertModal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(20,20,30,.94);
      color:#fff;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-family:sans-serif;">
@@ -423,6 +469,14 @@
       <button class="btn btn-outline-secondary btn-sm" data-toggle="modal" data-target="#patternHelpModal" title="Search pattern help">Regex</button>
       <button id="downloadSubtitleBtn" class="btn btn-info">Download Subtitles</button>
       <button id="downloadVideoEafBtn" class="btn btn-info" title="Download the video (.mp4) and annotations (.eaf)">Download Video + EAF</button>
+      <span id="clusterControls" class="ml-3" style="display:none; align-items:center; gap:6px;">
+        <label class="mb-0 mr-1" style="font-weight:600;">Status:</label>
+        <select id="clusterStatusSel" class="form-control form-control-sm" style="width:auto; display:inline-block;">
+          <option value="niet klaar">Niet klaar</option>
+          <option value="klaar">Klaar</option>
+        </select>
+        <button id="nextVideoBtn" class="btn btn-primary btn-sm ml-1" title="Sla op en ga naar de volgende video die nog niet op Klaar staat">Volgende &#9654;</button>
+      </span>
       <button id="saveSubtitlesBtn" class="btn btn-success">Autosave Enabled</button> <!-- Updated button text -->
       <button id="toggleAutoloopBtn" class="btn btn-warning">Disable Autoloop</button>
       <button id="autoSegmentBtn" class="btn btn-secondary">Auto Segmentation</button>
@@ -517,6 +571,11 @@
       </div>
     </div>
 
+    <div class="tl-scroll-bar only-clusters" style="display:flex; gap:6px; margin-bottom:4px; align-items:center;">
+      <button id="tlScrollLeft" class="btn btn-outline-secondary btn-sm" title="Tijdlijn naar links (pijl &#8592;)">&#9664;</button>
+      <button id="tlScrollRight" class="btn btn-outline-secondary btn-sm" title="Tijdlijn naar rechts (pijl &#8594;)">&#9654;</button>
+      <span class="text-muted small ml-2">&#8592; / &#8594; scrollen de tijdlijn</span>
+    </div>
     <div class="timeline-container" id="timelineContainer">
       <div id="timeRuler" style="position:absolute; top:0; left:0; width:600px; height:20px; pointer-events:none; z-index:9999;"></div>
       <div class="timeline-track" id="timelineTrack"></div>
@@ -530,13 +589,15 @@
 
   <script type="module">
     import getVideoFrames, { probeVideo } from "./video-frames.js";
+    // 'webcam' | 'clusters' | '' (default v3); set from ?mode= by the <head> script.
+    const mode = document.documentElement.dataset.mode || '';
 
     // Global state
     const TIER_HEIGHT = 80;
     let videoDuration = 5, subtitles = [], uniqueId = 0;
     let videoFileName = '';   // dropped video's filename, used in EAF + autosave name
     let videoBlob = null;     // the loaded video File/Blob, copied into the work folder so sessions can be restored
-    let segSourceBlob = null; // the ORIGINAL dropped file (pre 25fps/1080p normalization) — the 50fps segmenter profile needs the source frame rate; null on session restore
+    let segSourceBlob = null; // the ORIGINAL file/recording (pre 25fps/1080p normalization) — the 50fps segmenter profile needs the source frame rate; null on session restore
     let segVideoId = null;    // server-side videoId from /upload (server-convert path); null on wasm fallback or session restore
     let videoSavedToDir = false; // whether videoBlob has already been written to the work folder this session
     let videoLoaded = false;  // true once a video's frames are loaded (controls whether the drag overlay auto-hides)
@@ -618,10 +679,10 @@
       return (await r.json()).glosses || [];
     }
 
-    // Upload the ORIGINAL file to the segmenter's /upload (native ffmpeg there
-    // converts far faster than wasm), then download the 25fps/1080p browser
-    // copy. Returns {videoId, file}. Throws on any failure (caller falls back
-    // to the in-browser wasm converter).
+    // Upload the ORIGINAL file/recording to the segmenter's /upload (native
+    // ffmpeg there converts far faster than wasm), then download the
+    // 25fps/1080p browser copy. Returns {videoId, file}. Throws on any failure
+    // (caller falls back to the in-browser wasm converter).
     async function serverConvert(file) {
       showConvertModal('Uploading original…', 0);
       const videoId = await new Promise((resolve, reject) => {
@@ -692,6 +753,7 @@
     // Run gloss spotting for one segment, updating sub.spotState/spotResults and
     // re-rendering. Supersedes any prior in-flight request for the same sub.
     async function runSpot(sub, _retried) {
+      if (mode === 'clusters') return; // clusters: gloss-spotting server disabled
       if (!INFER_BASE) return;
       sub.spotState = 'loading';
       sub.spotResults = null;
@@ -848,6 +910,7 @@
       drawFrame(currentTime); // Only draw on the main canvas
       updateSubtitleTrack();
       updateCurrentTimeArrow();
+      if (mode === 'clusters' && who && who.indexOf('playing') === 0) followPlayhead();  // follow the play arrow during playback
       // checkAutoLoop(); // Removed: Logic moved to playInterval
     }
 
@@ -875,7 +938,7 @@
     const TARGET_FPS = 25;
     const SEG_MAX_UPLOAD = 190 * 1024 * 1024; // stay under Apache LimitRequestBody (200 MB)
     const TARGET_W = 1920, TARGET_H = 1080;
-    const MAX_DECODE_BYTES = 20 * 1024 * 1024 * 1024; // 20 GB decode-memory ceiling (frames are kept as ImageBitmaps)
+    const MAX_DECODE_BYTES = (mode === 'clusters' ? 30 : 20) * 1024 * 1024 * 1024; // decode-memory ceiling, GB (frames are kept as ImageBitmaps)
     let ffmpegInstance = null;
 
     function fitWithin(w, h, maxW, maxH) {
@@ -1025,7 +1088,7 @@
         }
         try {
           let converted = null;
-          if (SEG_BASE && file.size <= SEG_MAX_UPLOAD) {
+          if (SEG_BASE && mode !== 'clusters' /* clusters: in-browser (wasm) conversion only */ && file.size <= SEG_MAX_UPLOAD) {
             try {
               converted = await serverConvert(file);   // fast native path
               segVideoId = converted.videoId;
@@ -1316,6 +1379,22 @@
       // Apply the absolute position to both arrow and vertical line
       currentTimeArrow.style.left = absolutePosition + "px";
       currentTimeLine.style.left = (absolutePosition + 7) + "px"; // Center line with arrow (adjust for arrow width)
+    }
+
+    // Keep the play arrow in view during playback: auto-scroll the timeline to follow it
+    // so you don't have to press the scroll arrows to catch up to the playhead.
+    let autoFollowEnabled = true; // used in mode=clusters
+    function followPlayhead() {
+      if (!autoFollowEnabled) return;
+      const cont = timelineContainer;
+      const px = timeToPx(currentTime);
+      const view = cont.clientWidth;
+      const left = cont.scrollLeft, right = left + view;
+      const margin = view * 0.12;            // recenter when the arrow nears either edge (within 12%)
+      if (px > right - margin || px < left + margin) {
+        const max = Math.max(0, cont.scrollWidth - view);
+        cont.scrollLeft = Math.min(max, Math.max(0, px - view / 2));  // centre the arrow
+      }
     }
     // Additional direct scroll listener for immediate arrow updates
     timelineContainer.addEventListener('scroll', updateCurrentTimeArrow);
@@ -2041,12 +2120,14 @@ function updateSubtitleBoxDimensions(sub) {
 
 
     function endDrag() {
+      const sub = subtitles.find(s => s.id === dragId);
       dragActive = false; dragId = null;
       document.removeEventListener('mousemove', onDrag);
       document.removeEventListener('mouseup', endDrag);
       // Ensure button loop state is reset if drag ends outside? (mouseleave handles this)
       onEndThreeCanvases(); // Clear side canvases
       uploadSubtitles(); // Autosave on drag end
+      if (mode === 'webcam' && sub && sub.spotState) runSpot(sub); // boundaries moved -> re-spot this segment
     }
 
     // Left Resize
@@ -2094,12 +2175,14 @@ function updateSubtitleBoxDimensions(sub) {
 
 
     function endLeftResize() {
+      const sub = subtitles.find(s => s.id === leftResizeId);
       leftResizeActive = false; leftResizeId = null;
       autoLoopEnabled = true; // re-enable autoloop after left resize
       document.removeEventListener('mousemove', onLeftResize);
       document.removeEventListener('mouseup', endLeftResize);
       onEndThreeCanvases(); // Clear side canvases
       uploadSubtitles(); // Autosave on left resize end
+      if (mode === 'webcam' && sub && sub.spotState) runSpot(sub); // start changed -> re-spot this segment
     }
 
     // Right Resize
@@ -2144,12 +2227,14 @@ function updateSubtitleBoxDimensions(sub) {
       uploadSubtitles(); // Autosave during right resize
     }
     function endRightResize() {
+      const sub = subtitles.find(s => s.id === rightResizeId);
       rightResizeActive = false; rightResizeId = null;
       autoLoopEnabled = true; // re-enable autoloop after right resize
       document.removeEventListener('mousemove', onRightResize);
       document.removeEventListener('mouseup', endRightResize);
       onEndThreeCanvases(); // Clear side canvases
       uploadSubtitles(); // Autosave on right resize end
+      if (mode === 'webcam' && sub && sub.spotState) runSpot(sub); // end changed -> re-spot this segment
     }
 
     // Timeline "+" Button for Two-Step Creation
@@ -2277,12 +2362,12 @@ function updateSubtitleBoxDimensions(sub) {
     });
     function syncTwin(updatedSub) {
       if (!syncEnabled) return;
+      // Index-agnostic: follow the cloneId/masterId link, whatever tiers they sit on.
       let master, twin;
-      // Updated: master is now in row 1 and twin in row 2
-      if (tiers[1] && updatedSub.tierId === tiers[1].id) {
+      if (updatedSub.cloneId) {
         master = updatedSub;
         twin = subtitles.find(s => s.id === updatedSub.cloneId);
-      } else if (tiers[2] && updatedSub.tierId === tiers[2].id) {
+      } else if (updatedSub.masterId) {
         twin = updatedSub;
         master = subtitles.find(s => s.id === updatedSub.masterId);
       }
@@ -2292,6 +2377,26 @@ function updateSubtitleBoxDimensions(sub) {
         twin.start = updatedSub.start;
         twin.end = updatedSub.end;
       }
+    }
+    // Link tier-0 (predicted) boxes with their tier-1 (candidates) box that shares the
+    // same span, so adjusting one moves the other. Used for EAFs loaded from URL/file.
+    function linkTierTwins() {
+      if (!tiers[0] || !tiers[1]) return;
+      const t0 = subtitles.filter(s => s.tierId === tiers[0].id).sort((a, b) => a.start - b.start);
+      const t1 = subtitles.filter(s => s.tierId === tiers[1].id).sort((a, b) => a.start - b.start);
+      t0.forEach(m => { delete m.cloneId; });
+      t1.forEach(t => { delete t.masterId; });
+      const used = new Set();
+      t0.forEach(m => {
+        let best = null, bestD = Infinity;
+        t1.forEach(t => {
+          if (used.has(t.id)) return;
+          const d = Math.abs(t.start - m.start) + Math.abs(t.end - m.end);
+          if (d < bestD) { bestD = d; best = t; }
+        });
+        if (best && bestD < 0.05) { m.cloneId = best.id; best.masterId = m.id; used.add(best.id); }
+      });
+      syncEnabled = true;
     }
     function downloadSubtitle() {
       const base = (videoFileName || 'annotation').replace(/\.[^.]+$/, '');
@@ -2522,6 +2627,18 @@ function updateSubtitleBoxDimensions(sub) {
     // Actual upload logic
     async function performUpload() {
       if (!subtitles.length && tiers.length <= 1) { hasUnsavedChanges = false; return; }
+      // Cluster-correction mode: autosave the corrected EAF to the server (no folder needed).
+      if (mode === 'clusters' && window.__clusterSave && window.__clusterSave.enabled) {
+        try {
+          await window.__clusterSave.saveEAF();
+          hasUnsavedChanges = false;
+          document.getElementById('saveSubtitlesBtn').textContent = 'Opgeslagen op server';
+        } catch (e) {
+          console.warn('server autosave failed', e);
+          document.getElementById('saveSubtitlesBtn').textContent = 'Opslaan mislukt!';
+        }
+        return;
+      }
       try {
         const dir = await ensureWorkDir();
         if (!dir) { document.getElementById('saveSubtitlesBtn').textContent = 'Autosave: pick folder'; return; }
@@ -2646,6 +2763,7 @@ ${tierXml}
       tierUid = parsed.nextTierUid;
       subtitles = parsed.subtitles;
       uniqueId = Math.max(uniqueId || 0, parsed.nextSubId);
+      if (mode === 'clusters') linkTierTwins();
       renderAll();
       // rebuildTierControls is defined in a later task; guard so this is safe to call now.
       if (typeof rebuildTierControls === 'function') rebuildTierControls();
@@ -3133,6 +3251,7 @@ ${tierXml}
     // V-JEPA auto-segmentation: POST the video, fill tier-2, then auto-spot each segment.
     let segElapsedTimer = null;
     async function runSegmentation() {
+      if (mode === 'clusters') return; // clusters: auto-segmentation server disabled
       if (!SEG_BASE) return;
       if (isSegmentationInProgress) {
         showToast('Segmentation is already in progress. Please wait.', 'error', 3000);
@@ -3149,10 +3268,13 @@ ${tierXml}
       $('#segmentationStage').text('Segmenting…');
       const t0 = Date.now();
       $('#segmentationProgressMessage').text('Running V-JEPA segmentation…');
+      const _camBusyMsg = document.getElementById('camBusyMsg');   // webcam spinner overlay
+      if (_camBusyMsg) _camBusyMsg.textContent = 'Segmenting your sign…';
       clearInterval(segElapsedTimer);
       segElapsedTimer = setInterval(() => {
         const s = Math.round((Date.now() - t0) / 1000);
         $('#segmentationProgressMessage').text('Running V-JEPA segmentation… ' + s + 's');
+        if (_camBusyMsg) _camBusyMsg.textContent = 'Segmenting your sign… ' + s + 's';
       }, 1000);
       $('#segmentationProgressModal').modal('show');
 
@@ -3186,6 +3308,9 @@ ${tierXml}
         });
         $bar.removeClass('progress-bar-striped progress-bar-animated');
         isSegmentationInProgress = false;
+        // Reveal the timeline: segments are placed and each is now auto-spotting
+        // (each shows its own .spot-spinner circle).
+        const _cb = document.getElementById('camBusy'); if (_cb) _cb.style.display = 'none';
       }
     }
 
@@ -3742,33 +3867,204 @@ document.addEventListener('mousedown', function(e) {
     // clear feedback that dropping works — for both video and EAF, even after a video is loaded.
     let dragDepth = 0;
     const dragHasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
-    const dropOverlayEl = () => document.getElementById('dropOverlay');
-    const eafBoxOpen = () => document.getElementById('eafDropBox').style.display === 'flex';
-    window.addEventListener('dragenter', e => {
-      if (!dragHasFiles(e) || eafBoxOpen()) return; // the manual EAF box handles its own drag
-      dragDepth++;
-      dropOverlayEl().style.display = 'flex';
-      dropOverlayEl().classList.add('drag-active');
-    });
-    window.addEventListener('dragleave', e => {
-      if (!dragHasFiles(e) || eafBoxOpen()) return;
-      dragDepth = Math.max(0, dragDepth - 1);
-      if (dragDepth === 0) {
+    if (mode !== 'webcam') {  // webcam mode records instead of accepting drops
+      const dropOverlayEl = () => document.getElementById('dropOverlay');
+      const eafBoxOpen = () => document.getElementById('eafDropBox').style.display === 'flex';
+      window.addEventListener('dragenter', e => {
+        if (!dragHasFiles(e) || eafBoxOpen()) return; // the manual EAF box handles its own drag
+        dragDepth++;
+        dropOverlayEl().style.display = 'flex';
+        dropOverlayEl().classList.add('drag-active');
+      });
+      window.addEventListener('dragleave', e => {
+        if (!dragHasFiles(e) || eafBoxOpen()) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+          dropOverlayEl().classList.remove('drag-active');
+          if (videoLoaded) dropOverlayEl().style.display = 'none'; // keep showing before the first video
+        }
+      });
+      ['dragover','drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+      document.addEventListener('drop', e => {
+        dragDepth = 0;
         dropOverlayEl().classList.remove('drag-active');
-        if (videoLoaded) dropOverlayEl().style.display = 'none'; // keep showing before the first video
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) handleDroppedFiles(files);
+        else if (videoLoaded) dropOverlayEl().style.display = 'none';
+      });
+      document.getElementById('filePicker').addEventListener('change', e => {
+        if (e.target.files.length) handleDroppedFiles(e.target.files);
+      });
+    }
+    if (mode === 'webcam') {
+      // ===== Webcam capture (webcam/ tool: record -> preview -> use) ==========
+      // Replaces the file-drop entry. "Use this" hands the recording to
+      // prepareAndLoadVideo(): the original (ideally 50 fps) goes to the server
+      // for conversion + segmentation; the returned 25 fps copy feeds the
+      // timeline and the auto-segment + auto-spot pipeline.
+      let camStream = null, camRecorder = null, camChunks = [], camBlob = null, camTimerInt = null;
+      const camEl = (id) => document.getElementById(id);
+      function camPickMime() {
+        const opts = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+        for (const m of opts) {
+          if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m;
+        }
+        return '';
       }
-    });
-    ['dragover','drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
-    document.addEventListener('drop', e => {
-      dragDepth = 0;
-      dropOverlayEl().classList.remove('drag-active');
-      const files = e.dataTransfer && e.dataTransfer.files;
-      if (files && files.length) handleDroppedFiles(files);
-      else if (videoLoaded) dropOverlayEl().style.display = 'none';
-    });
-    document.getElementById('filePicker').addEventListener('change', e => {
-      if (e.target.files.length) handleDroppedFiles(e.target.files);
-    });
+      async function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          camEl('camError').textContent = 'This browser has no webcam access (getUserMedia). Use Chrome or Edge over HTTPS.';
+          camEl('camError').style.display = 'block';
+          return;
+        }
+        try {
+          // frameRate ideal 50: feed the ensemble50 segmenter (50 fps) real frames.
+          // `ideal` degrades gracefully — cameras capped at 30 fps still work.
+          camStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 },
+                     frameRate: { ideal: 50 } }, audio: false });
+          camEl('camPreview').srcObject = camStream;
+          camEl('camError').style.display = 'none';
+        } catch (e) {
+          camEl('camError').textContent = 'Could not access the webcam: ' + (e && e.message ? e.message : e)
+            + '. Allow camera access and reload.';
+          camEl('camError').style.display = 'block';
+        }
+      }
+      function startRecording() {
+        if (!camStream) { startCamera(); return; }
+        camChunks = []; camBlob = null;
+        const mime = camPickMime();
+        try {
+          camRecorder = new MediaRecorder(camStream, mime ? { mimeType: mime } : undefined);
+        } catch (e) {
+          camEl('camError').textContent = 'Recording is not supported here: ' + (e && e.message ? e.message : e);
+          camEl('camError').style.display = 'block';
+          return;
+        }
+        camRecorder.ondataavailable = e => { if (e.data && e.data.size) camChunks.push(e.data); };
+        camRecorder.onstop = () => {
+          camBlob = new Blob(camChunks, { type: (camRecorder && camRecorder.mimeType) || 'video/webm' });
+          const rec = camEl('camRecorded');
+          rec.src = URL.createObjectURL(camBlob);
+          rec.style.display = 'block';
+          camEl('camPreview').style.display = 'none';
+          camEl('camControls').style.display = 'none';
+          camEl('camReview').style.display = 'flex';
+        };
+        camRecorder.start();
+        const btn = camEl('camRecordBtn');
+        btn.textContent = '■ Stop'; btn.style.background = '#fb8c00';
+        const t0 = Date.now();
+        clearInterval(camTimerInt);
+        camTimerInt = setInterval(() => { camEl('camTimer').textContent = ((Date.now() - t0) / 1000).toFixed(1) + 's'; }, 100);
+      }
+      function stopRecording() {
+        if (camRecorder && camRecorder.state !== 'inactive') camRecorder.stop();
+        clearInterval(camTimerInt);
+        const btn = camEl('camRecordBtn');
+        btn.textContent = '● Record'; btn.style.background = '#e53935';
+      }
+      function camRetake() {
+        camBlob = null;
+        const rec = camEl('camRecorded');
+        if (rec.src) { URL.revokeObjectURL(rec.src); rec.removeAttribute('src'); rec.load(); }
+        rec.style.display = 'none';
+        camEl('camPreview').style.display = 'block';
+        camEl('camControls').style.display = 'flex';
+        camEl('camReview').style.display = 'none';
+        camEl('camTimer').textContent = '0.0s';
+      }
+      async function camUse() {
+        if (!camBlob) return;
+        if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }  // release the camera
+        const busy = document.getElementById('camBusy');
+        const busyMsg = document.getElementById('camBusyMsg');
+        if (busyMsg) busyMsg.textContent = 'Converting & loading your recording…';
+        if (busy) busy.style.display = 'flex';     // one spinner covers convert -> decode -> segment
+        const ext = (camBlob.type.indexOf('mp4') >= 0) ? 'mp4' : 'webm';
+        const file = new File([camBlob], 'webcam.' + ext, { type: camBlob.type || 'video/webm' });
+        try {
+          const ok = await prepareAndLoadVideo(file);  // -> 25fps -> timeline -> auto-segment + auto-spot
+          if (ok === false && busy) busy.style.display = 'none';   // memory guard / aborted
+        } catch (e) {
+          if (busy) busy.style.display = 'none';
+          console.error('[webcam] load failed', e);
+        }
+      }
+      camEl('camRecordBtn').addEventListener('click', () => {
+        if (camRecorder && camRecorder.state === 'recording') stopRecording(); else startRecording();
+      });
+      camEl('camUseBtn').addEventListener('click', () => { camUse(); });
+      camEl('camRetakeBtn').addEventListener('click', camRetake);
+      startCamera();
+    }
+    if (mode === 'clusters') {
+      // --- URL-param deep link (added for cluster correction workflow) ---
+      (async () => {
+        const p = new URLSearchParams(location.search);
+        const videoUrl = p.get('video');
+        const eafUrl   = p.get('eaf');
+        const seekT    = parseFloat(p.get('t'));
+        if (!videoUrl && !eafUrl) return;
+        const nameFromUrl = (u, fallback) => {
+          try {
+            const base = decodeURIComponent(new URL(u, location.href).pathname.split('/').pop() || '');
+            return base || fallback;
+          } catch (_) { return fallback; }
+        };
+        try {
+          const files = [];
+          if (eafUrl) {
+            // Prefer a previously-saved corrected EAF (served by edit/io.php) over the freshly-emitted one (out/eaf/).
+            let useEaf = eafUrl;
+            try {
+              const m = eafUrl.match(/\/clusters\/out\/eaf\/([^/?#]+)\.eaf(?:[?#]|$)/);
+              const corr = m ? '../clusters/edit/io.php?eaf=' + encodeURIComponent(decodeURIComponent(m[1])) : eafUrl;
+              if (corr !== eafUrl) {
+                const cr = await fetch(corr, { cache: 'no-store' });
+                if (cr.ok) useEaf = corr;
+              }
+            } catch (_) {}
+            const r = await fetch(useEaf);
+            if (!r.ok) throw new Error('EAF fetch failed: ' + r.status);
+            const text = await r.text();
+            let name = nameFromUrl(eafUrl, 'clip.eaf');
+            if (!name.toLowerCase().endsWith('.eaf')) name += '.eaf';
+            files.push(new File([text], name, { type: 'application/xml' }));
+          }
+          if (videoUrl) {
+            const r = await fetch(videoUrl);
+            if (!r.ok) throw new Error('Video fetch failed: ' + r.status);
+            const blob = await r.blob();
+            let name = nameFromUrl(videoUrl, 'clip.mp4');
+            if (!name.toLowerCase().endsWith('.mp4')) name += '.mp4';
+            files.push(new File([blob], name, { type: 'video/mp4' }));
+          }
+          if (files.length) await handleDroppedFiles(files);
+          if (!isNaN(seekT) && videoUrl) {
+            const seek = () => {
+              if (typeof videoLoaded !== 'undefined' && videoLoaded &&
+                  typeof setCanvasTime === 'function') {
+                setCanvasTime(seekT, 'deep-link');
+                // also scroll the timeline so the playhead at seekT is centered (setCanvasTime
+                // only moves the frame/arrow, it doesn't scroll the overflow-x:hidden track)
+                try {
+                  const tc = document.getElementById('timelineContainer');
+                  const px = (typeof timeToPx === 'function') ? timeToPx(seekT) : 0;
+                  if (tc) tc.scrollLeft = Math.max(0, px - tc.clientWidth / 2);
+                } catch (_) {}
+              } else {
+                setTimeout(seek, 150);
+              }
+            };
+            seek();
+          }
+        } catch (err) {
+          console.error('[deep-link] failed to load from URL params:', err);
+        }
+      })();
+    }
 
     async function tryRestoreSession() {
       try {
@@ -3812,8 +4108,129 @@ document.addEventListener('mousedown', function(e) {
         }
       } catch (err) { console.warn('Restore skipped:', err); }
     }
-    tryRestoreSession();
+    // webcam: always start from a fresh recording; clusters: the deep link loads its own video+EAF
+    if (!mode) tryRestoreSession();
 
+    if (mode === 'clusters') {
+      // === Cluster-correction controls: status dropdown + next-unfinished + timeline scroll ===
+      function scrollTimeline(dir) {
+        const tc = document.getElementById('timelineContainer');
+        if (!tc) return;
+        // Advance ~a full visible window, keeping a 0.5s overlap (independent of zoom).
+        // NB: the container is overflow-x:hidden, so smooth scrollBy barely moves — set scrollLeft directly.
+        const overlapPx = (typeof getScale === 'function') ? getScale() * 0.5 : tc.clientWidth * 0.1;
+        const step = Math.max(100, tc.clientWidth - overlapPx);
+        const max = Math.max(0, tc.scrollWidth - tc.clientWidth);
+        tc.scrollLeft = Math.min(max, Math.max(0, tc.scrollLeft + dir * step));
+      }
+
+      (function setupClusterControls() {
+        const params = new URLSearchParams(location.search);
+        const eafUrl = params.get('eaf');
+        const videoUrl = params.get('video');
+        const enabled = !!(eafUrl || videoUrl);
+        const IO = '../clusters/edit/io.php';
+        const VIDEOS = '../clusters/out/videos.json';
+        const ABS = 'https://signcollect.nl/annotation-tool/clusters/';
+
+        const nameOf = () => {
+          const src = eafUrl || videoUrl || '';
+          try {
+            const b = decodeURIComponent(new URL(src, location.href).pathname.split('/').pop() || '');
+            return b.replace(/\.(eaf|mp4)$/i, '');
+          } catch (_) { return ''; }
+        };
+        const videoName = nameOf();
+
+        // Timeline scroll buttons (work regardless of cluster mode)
+        const sl = document.getElementById('tlScrollLeft');
+        const sr = document.getElementById('tlScrollRight');
+        if (sl) sl.addEventListener('click', () => scrollTimeline(-1));
+        if (sr) sr.addEventListener('click', () => scrollTimeline(1));
+
+        // Arrow keys scroll the timeline even when a gloss box (contentEditable) is focused.
+        // Capture phase so it beats the box/global keydown handlers; only real text fields opt out.
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          const t = e.target, tag = t && t.tagName;
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // let caret move in real fields
+          if (t && t.isContentEditable && typeof t.blur === 'function') t.blur(); // commit the gloss edit
+          e.preventDefault();
+          e.stopPropagation();
+          scrollTimeline(e.key === 'ArrowLeft' ? -1 : 1);
+        }, true);
+
+        if (!enabled || !videoName) return;
+
+        // Server autosave hook (consumed by performUpload)
+        async function saveToServer(status) {
+          const payload = { video: videoName };
+          if (status !== undefined) payload.status = status;
+          try { payload.eaf = buildEAF(videoFileName); } catch (_) {}
+          const r = await fetch(IO, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!r.ok) throw new Error('save HTTP ' + r.status);
+          return r.json().catch(() => ({}));
+        }
+        window.__clusterSave = { enabled: true, saveEAF: () => saveToServer(undefined) };
+
+        const ctr = document.getElementById('clusterControls');
+        if (ctr) ctr.style.display = 'inline-flex';
+        const sel = document.getElementById('clusterStatusSel');
+        const nextBtn = document.getElementById('nextVideoBtn');
+
+        // Load current status into the dropdown
+        fetch(IO, { cache: 'no-store' }).then(r => r.json()).then(map => {
+          const entry = (map && !Array.isArray(map)) ? map[videoName] : null;
+          const cur = entry && entry.status ? String(entry.status).toLowerCase() : 'niet klaar';
+          if (sel) sel.value = (cur === 'klaar') ? 'klaar' : 'niet klaar';
+        }).catch(() => {});
+
+        if (sel) sel.addEventListener('change', () => {
+          saveToServer(sel.value)
+            .then(() => showToast('Status: ' + sel.value, 'success', 1500))
+            .catch(e => showToast('Status opslaan mislukt: ' + e.message, 'error', 3000));
+        });
+
+        if (nextBtn) nextBtn.addEventListener('click', async () => {
+          nextBtn.disabled = true;
+          const restore = () => { nextBtn.disabled = false; };
+          try {
+            await saveToServer(sel ? sel.value : undefined); // persist current (status + EAF)
+            const [vids, statusMap] = await Promise.all([
+              fetch(VIDEOS, { cache: 'no-store' }).then(r => r.json()),
+              fetch(IO, { cache: 'no-store' }).then(r => r.json()).catch(() => ({}))
+            ]);
+            const isDone = (v) => {
+              const e = (statusMap && !Array.isArray(statusMap)) ? statusMap[v] : null;
+              return !!(e && String(e.status || '').toLowerCase() === 'klaar');
+            };
+            const names = vids.map(v => v.video);
+            const start = names.indexOf(videoName);
+            let pick = null;
+            for (let k = 1; k <= names.length; k++) {
+              const idx = ((start < 0 ? -1 : start) + k) % names.length;
+              if (!isDone(names[idx])) { pick = vids[idx]; break; }
+            }
+            if (!pick) {
+              showToast('Alle video’s staan op Klaar! 🎉', 'success', 5000);
+              restore();
+              return;
+            }
+            const eaf = ABS + 'out/eaf/' + pick.video + '.eaf';
+            const vid = pick.video_url || (ABS + 'vid/' + pick.video + '.mp4');
+            location.href = 'index.html?mode=clusters&video=' + encodeURIComponent(vid) + '&eaf=' + encodeURIComponent(eaf);
+          } catch (e) {
+            showToast('Kon volgende video niet laden: ' + e.message, 'error', 4000);
+            restore();
+          }
+        });
+      })();
+
+    }
 </script>
   <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>

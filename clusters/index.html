@@ -124,7 +124,7 @@ function render(){
   for(const card of g.children)io.observe(card);
 }
 // ===== Cluster detail: all member signs in one overview =====
-const TOOL="tool/?", ABS="https://signcollect.nl/annotation-tool/clusters/";
+const TOOL="../v3/?mode=clusters&", ABS="https://signcollect.nl/annotation-tool/clusters/";
 let mio=null;
 function openCluster(cid){
   const c=clusters.find(x=>x.cluster_id===cid);if(!c)return;

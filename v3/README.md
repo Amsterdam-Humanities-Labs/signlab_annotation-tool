@@ -62,3 +62,9 @@ python3 -m http.server 8799   # open http://localhost:8799/ in Chrome or Edge
 ## EAF format
 - Loading: reads the `TIME_ORDER`/`TIME_SLOT` times and the `ALIGNABLE_ANNOTATION`s of each `<TIER>`. A tier without time-aligned annotations loads empty.
 - Saving: writes ELAN EAF 3.0 with a `MEDIA_DESCRIPTOR` for the video file name, one set of time slots without duplicates, and one `<TIER>` per timeline row. ELAN opens the result, and this tool reads it back.
+
+## Modes
+One editor, picked with `?mode=` (#37):
+- default: drop a video/EAF, local-folder autosave, session restore.
+- `?mode=webcam` (old `webcam/` redirects here): record from the webcam (asks for 50 fps) instead of dropping a file; the recording is converted, segmented and spotted as in v3; moving a spotted segment re-spots it; no session restore.
+- `?mode=clusters` (old `clusters/tool/` redirects here): opens `?video=&eaf=&t=` from `clusters/index.html` / `videos.html`, needs a login (`/userProtect.js`), autosaves to `clusters/edit/io.php`, status + "Volgende" controls, timeline scroll buttons/arrow keys, follows the playhead; spotting, server conversion and auto-segmentation are off.
