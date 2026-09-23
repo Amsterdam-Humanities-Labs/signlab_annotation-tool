@@ -6,7 +6,7 @@ A browser editor for annotating NGT video on a timeline with several tiers. It s
 |---|---|
 | `v3/` | The editor. Drop a video (and optionally an `.eaf`), annotate, and it autosaves `<video>.eaf` to a local folder. Adds automatic segmentation (V-JEPA 2) and gloss spotting (SignRep). User guide: `v3/README.md`. |
 | `webcam/` | A copy of v3 that starts from a webcam recording. See `webcam/README.md`. |
-| `clusters/` | Review pages for pre-computed cluster segmentations. `clusters/tool/` is a copy of v3 that opens from a link and autosaves to `clusters/edit/io.php`. |
+| `clusters/` | Review pages for pre-computed cluster segmentations: `index.html` (clusters), `merge.html` (merge review), `segview.html`, `videos.html`. `clusters/tool/` is a copy of v3 that opens from a link and autosaves to `clusters/edit/io.php`. |
 | `practice/` | An NGT practice app. The gloss spotter scores your sign. See `practice/README.md`. |
 | `docs/` | Design specs and paper sources. |
 
@@ -27,6 +27,8 @@ for d in v3 webcam clusters/tool; do mkdir -p $d/vendor/ffmpeg/esm
 cp -rn v3/vendor/ffmpeg/. clusters/tool/vendor/ffmpeg/   # clusters/tool has no loaders in git
 python3 -m http.server 8799   # open http://localhost:8799/ in Chrome or Edge
 ```
+Tests for the practice logic: `cd practice && npm test` (Node's built-in test runner).
+
 A daily cron job runs `clusters/backup_eaf.sh`. It copies the EAFs and review data to `gebarenoverleg_media/studioFiles/annotation-tool/segments/` and keeps 30 days.
 
 ## Configuration
@@ -34,6 +36,7 @@ A daily cron job runs `clusters/backup_eaf.sh`. It copies the EAFs and review da
 - `<webroot>/annotation_data/clusters/` lives outside the checkout and must be writable by www-data. `clusters/edit/io.php` and `merge_io.php` write `status.json`, `merge_decisions.json` and `eaf/*.eaf` there. The first request copies the start data from `clusters/edit/seed/`.
 - Saving (POST) needs a portal login (`menu_beta/php_api/session.php` in signCollect-v2) and only accepts same-origin requests.
 - `clusters/out/`, `clusters/vid/` and `clusters/clips/` hold pipeline output and are gitignored.
+- `SC_WEB_ROOT` (environment, default `/web`) tells `backup_eaf.sh` where the install root is.
 
 ## Dependencies
 | Used for | Endpoint |
