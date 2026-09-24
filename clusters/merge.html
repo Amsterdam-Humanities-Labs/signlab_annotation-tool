@@ -97,14 +97,25 @@ function show(){
 async function decide(d){
   if(view.length===0)return;
   const p=pairs[view[i]];
-  dec[key(p)]={decision:d,ts:Date.now()};
+  const k=key(p), before=dec[k];
+  dec[k]={decision:d,ts:Date.now()};
   refreshCounts();
   fetch(IO,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({a:p.a,b:p.b,decision:d})}).catch(()=>{});
+    body:JSON.stringify({a:p.a,b:p.b,decision:d})})
+    .then(r=>{if(!r.ok)throw r.status;})
+    .catch(st=>saveFailed(k,before,st));
   stopVideos();
   // in 'undecided' view the current item disappears; in 'all' view advance
   if($("filter").value==="undecided"){view.splice(i,1);if(i>=view.length)i=view.length;show();}
   else next();
+}
+// A save that did not reach the server must not look saved: undo it locally,
+// so it shows as undecided again, and tell the reviewer.
+function saveFailed(k,before,st){
+  if(before)dec[k]=before;else delete dec[k];
+  refreshCounts();buildView();show();
+  if(st===401){alert("Not saved: your login has expired. Log in again, then redo the last decision.");location.href="/login.html?redirect="+encodeURIComponent(location.href);}
+  else alert("Not saved (server error"+(typeof st==="number"?" "+st:"")+"). That pair is still undecided; try again.");
 }
 function next(){stopVideos();if(i<view.length-1){i++;show();}else if($("filter").value==="undecided"){show();}else{/*end*/}}
 function back(){stopVideos();if(i>0){i--;show();}}
