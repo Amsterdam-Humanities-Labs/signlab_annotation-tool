@@ -15,6 +15,7 @@ function read_dec($f) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+  header('Cache-Control: no-store');
   echo json_encode(read_dec(ann_read_path('merge_decisions.json')));
   exit;
 }
@@ -32,11 +33,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $DIR = ann_data_ready();
   if ($DIR === '') ann_fail_unwritable();
   $DEC = $DIR . '/merge_decisions.json';
+  // Serialize read-modify-write: without the lock, two quick decisions
+  // each read the old file and the second write drops the first.
+  $lock = @fopen($DEC . '.lock', 'c');
+  if (!$lock || !flock($lock, LOCK_EX)) ann_fail_unwritable();
   $st = read_dec($DEC);
   $st[$a . '_' . $b] = array('decision' => $d, 'ts' => time());
   $tmp = $DEC . '.tmp';
-  @file_put_contents($tmp, json_encode($st));
-  @rename($tmp, $DEC);
+  $ok = @file_put_contents($tmp, json_encode($st)) !== false && @rename($tmp, $DEC);
+  flock($lock, LOCK_UN);
+  fclose($lock);
+  if (!$ok) ann_fail_unwritable();
   echo json_encode(array('ok'=>true, 'pair'=>$a.'_'.$b, 'decision'=>$d, 'total'=>count($st)));
   exit;
 }
