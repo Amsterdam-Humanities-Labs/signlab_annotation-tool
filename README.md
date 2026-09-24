@@ -49,3 +49,10 @@ A daily cron job runs `clusters/backup_eaf.sh`. It copies the EAFs and review da
 | Cluster video | URLs in `clusters/out/videos.json` (studio media) |
 
 Only the core server has the segmenter and spotter proxies. On demo hosts the AI features fail without an error.
+
+## License and citation
+
+Apache License 2.0, copyright University of Amsterdam: see [LICENSE](LICENSE) and
+[NOTICE](NOTICE). You may use it, also commercially, as long as you credit
+Gomer Otterspeer / University of Amsterdam as the source. To cite it, use
+[CITATION.cff](CITATION.cff) (the *Cite this repository* button on GitHub) or the DOI [10.21942/uva.33980296](https://doi.org/10.21942/uva.33980296).
